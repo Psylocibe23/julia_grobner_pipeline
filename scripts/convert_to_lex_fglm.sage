@@ -1,0 +1,53 @@
+import sys
+
+def read_groebner_basis_file(result_file):
+    with open(result_file, 'r') as f:
+        lines = f.readlines()
+    # Parse metadata
+    variables = None
+    p = None
+    polys = []
+    for line in lines:
+        if line.startswith("# Variables:"):
+            variables = [v.strip() for v in line.split(":",1)[1].split(",")]
+        elif line.startswith("# Field characteristic:"):
+            p = int(line.split(":")[1].strip())
+        elif line.startswith("# --- Groebner basis ---"):
+            break
+    # The rest are basis polynomials
+    basis_start = lines.index("# --- Groebner basis ---\n") + 1
+    for line in lines[basis_start:]:
+        s = line.strip()
+        if s:
+            polys.append(s)
+    return variables, p, polys
+
+def main():
+    if len(sys.argv) != 2:
+        print("Usage: sage convert_to_lex_fglm.sage path/to/result_file.txt")
+        sys.exit(1)
+    result_file = sys.argv[1]
+    variables, p, polys = read_groebner_basis_file(result_file)
+    print(f"Variables: {variables}")
+    print(f"Field: GF({p})")
+    print(f"Basis: {polys}")
+    # Construct polynomial ring in LEX order
+    R_lex = PolynomialRing(GF(p), variables, order='lex')
+    # Parse polynomials into the ring
+    G_lex = [R_lex(s) for s in polys]
+    I_lex = Ideal(G_lex)
+    # Compute Groebner basis in LEX using Singular’s FGLM
+    G_lex_fglm = I_lex.groebner_basis(algorithm="singular:stdfglm")
+    print("\nLEX Groebner basis via FGLM:")
+    for g in G_lex_fglm:
+        print(g)
+    # Optionally: save to file
+    lex_outfile = result_file.replace(".txt", "_LEX.txt")
+    with open(lex_outfile, "w") as out:
+        out.write(f"# Lex Groebner basis for {result_file}\n")
+        for g in G_lex_fglm:
+            out.write(str(g) + "\n")
+    print(f"\nSaved to {lex_outfile}")
+
+if __name__ == "__main__":
+    main()

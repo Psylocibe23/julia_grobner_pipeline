@@ -1,0 +1,8 @@
+# Groebner basis (F4) computed for data/toy_test.in
+# Variables: x, y
+# Field characteristic: 2
+# Number of input equations: 2
+# --- Groebner basis ---
+x + y^2 + 1
+x*y + y + 1
+x^2 + y + 1
