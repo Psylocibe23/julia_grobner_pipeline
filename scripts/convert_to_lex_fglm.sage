@@ -3,19 +3,24 @@ import sys
 def read_groebner_basis_file(result_file):
     with open(result_file, 'r') as f:
         lines = f.readlines()
-    # Parse metadata
-    variables = None
-    p = None
-    polys = []
-    for line in lines:
-        if line.startswith("# Variables:"):
-            variables = [v.strip() for v in line.split(":",1)[1].split(",")]
-        elif line.startswith("# Field characteristic:"):
-            p = int(line.split(":")[1].strip())
-        elif line.startswith("# --- Groebner basis ---"):
-            break
+        variables = None
+        p = None
+        polys = []
+        for i, line in enumerate(lines):
+            if line.startswith("# Variables:"):
+                variables = [v.strip() for v in line.split(":",1)[1].split(",")]
+            elif line.startswith("# Field characteristic:"):
+                p = int(line.split(":")[1].strip())
+            elif line.startswith("# Field: GF("):
+                # Handles lines like "# Field: GF(17)"
+                p = int(line.split("GF(")[1].split(")")[0].strip())
+            elif line.startswith("# --- Groebner basis ---"):
+                basis_start = i + 1
+                break
+        else:
+            raise ValueError("Could not find basis start in file.")
+
     # The rest are basis polynomials
-    basis_start = lines.index("# --- Groebner basis ---\n") + 1
     for line in lines[basis_start:]:
         s = line.strip()
         if s:
@@ -24,13 +29,13 @@ def read_groebner_basis_file(result_file):
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: sage convert_to_lex_fglm.sage path/to/result_file.txt")
+        print("Usage: sage scripts/convert_to_lex_fglm.sage path/to/result_file.txt")
         sys.exit(1)
     result_file = sys.argv[1]
     variables, p, polys = read_groebner_basis_file(result_file)
-    print(f"Variables: {variables}")
-    print(f"Field: GF({p})")
-    print(f"Basis: {polys}")
+    print(f"Inferred variables: {variables}")
+    print(f"Field characteristic: {p}")
+
     # Construct polynomial ring in LEX order
     R_lex = PolynomialRing(GF(p), variables, order='lex')
     # Parse polynomials into the ring
@@ -41,12 +46,14 @@ def main():
     print("\nLEX Groebner basis via FGLM:")
     for g in G_lex_fglm:
         print(g)
-    # Optionally: save to file
+    # Save to file
     lex_outfile = result_file.replace(".txt", "_LEX.txt")
     with open(lex_outfile, "w") as out:
         out.write(f"# Lex Groebner basis for {result_file}\n")
+        out.write(f"# Field: GF({p})\n")
         for g in G_lex_fglm:
             out.write(str(g) + "\n")
+    
     print(f"\nSaved to {lex_outfile}")
 
 if __name__ == "__main__":

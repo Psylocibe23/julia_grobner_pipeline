@@ -6,16 +6,23 @@ mkpath("logs")
 mkpath("results")
 
 # Read and parse the input file
-filename = "data/toy_test.in"
+filename = "data/toy_test_prime_field.in"
 lines = readlines(filename)
 var_names = [strip(v) for v in split(strip(lines[1]), ",")]
-p = parse(Int, strip(lines[2]))
 
-# Create field and polynomial ring
-if p == 2
-    K = GF(2)
+# --- Field parsing logic supporting both p and p^n formats ---
+field_spec = strip(lines[2])
+if occursin("^", field_spec)
+    base, ext = split(field_spec, "^")
+    p = parse(Int, strip(base))
+    n = parse(Int, strip(ext))
+    K = GF(p, n, "a")  # "a" as primitive element
+    field_desc = "GF($p^$n)"
 else
+    p = parse(Int, field_spec)
+    n = 1
     K = GF(p)
+    field_desc = "GF($p)"
 end
 
 R, vars = polynomial_ring(K, var_names)
@@ -49,7 +56,7 @@ result_file = "results/$(input_id)_F4_$timestamp.txt"
 open(log_file, "w") do logio
     redirect_stdout(logio) do
         redirect_stderr(logio) do
-            println("Loaded system with $(length(var_names)) variables and $(length(polys)) equations over GF($p)")
+            println("Loaded system with $(length(var_names)) variables and $(length(polys)) equations over $field_desc")
             @time G = groebner_basis(I; info_level=2)
             println("\nComputed Groebner basis (F4):")
             for g in G
@@ -65,7 +72,7 @@ open(log_file, "w") do logio
             open(result_file, "w") do fio
                 println(fio, "# Groebner basis (F4) computed for $(filename)")
                 println(fio, "# Variables: ", join(var_names, ", "))
-                println(fio, "# Field characteristic: $p")
+                println(fio, "# Field: $field_desc")
                 println(fio, "# Number of input equations: $(length(polys))")
                 println(fio, "# --- Groebner basis ---")
                 for g in G

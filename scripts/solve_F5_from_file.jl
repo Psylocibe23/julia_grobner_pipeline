@@ -7,7 +7,7 @@ mkpath("logs")
 mkpath("results")
 
 # --- Read and parse the input file
-filename = "data/toy_test.in"
+filename = "data/toy_test_prime_field.in"
 lines = readlines(filename)
 var_names = [strip(v) for v in split(strip(lines[1]), ",")]
 p = parse(Int, strip(lines[2]))
@@ -80,4 +80,3 @@ open(log_file, "w") do logio
 end
 
 println("Computation done. Log: $log_file   Result: $result_file")
-
