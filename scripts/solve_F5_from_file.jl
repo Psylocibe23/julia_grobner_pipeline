@@ -6,8 +6,17 @@ using Dates
 mkpath("logs")
 mkpath("results")
 
-# --- Read and parse the input file
-filename = "data/toy_test_prime_field.in"
+# --- Parse command-line arguments
+function parse_args()
+    if length(ARGS) < 1
+        println("Usage: julia solve_F4_from_file.jl <inputfile> [nthreads]")
+        exit(1)
+    end
+    filename = ARGS[1]
+    return filename
+end
+
+filename = parse_args()
 lines = readlines(filename)
 var_names = [strip(v) for v in split(strip(lines[1]), ",")]
 p = parse(Int, strip(lines[2]))
@@ -49,7 +58,7 @@ open(log_file, "w") do logio
             println("Loaded system with $(length(var_names)) variables and $(length(polys)) equations over GF($p)")
 
             # --- F5 computation
-            @time sig_basis = sig_groebner_basis(polys; info_level=2)
+            @time sig_basis = sig_groebner_basis(polys; info_level=1)
             G = [f[2] for f in sig_basis]
             println("\nComputed Groebner basis (F5):")
             for g in G

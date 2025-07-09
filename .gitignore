@@ -1,0 +1,3 @@
+# Ignore log and result folders and all their contents
+logs/
+results/

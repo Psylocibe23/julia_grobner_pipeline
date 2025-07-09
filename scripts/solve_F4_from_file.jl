@@ -2,11 +2,22 @@ using AlgebraicSolving
 import Base.Filesystem: mkpath
 using Dates
 
+# --- Parse command-line arguments
+function parse_args()
+    if length(ARGS) < 1
+        println("Usage: julia solve_F4_from_file.jl <inputfile> [nthreads]")
+        exit(1)
+    end
+    filename = ARGS[1]
+    nthreads = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 1
+    return filename, nthreads
+end
+
+filename, nthreads = parse_args()
+
 mkpath("logs")
 mkpath("results")
 
-# Read and parse the input file
-filename = "data/toy_test_prime_field.in"
 lines = readlines(filename)
 var_names = [strip(v) for v in split(strip(lines[1]), ",")]
 
@@ -57,7 +68,8 @@ open(log_file, "w") do logio
     redirect_stdout(logio) do
         redirect_stderr(logio) do
             println("Loaded system with $(length(var_names)) variables and $(length(polys)) equations over $field_desc")
-            @time G = groebner_basis(I; info_level=2)
+            println("Using $nthreads threads for computation.")
+            @time G = groebner_basis(I; info_level=2, nr_thrds=nthreads)
             println("\nComputed Groebner basis (F4):")
             for g in G
                 println(g)
