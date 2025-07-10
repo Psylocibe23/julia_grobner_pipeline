@@ -67,7 +67,7 @@ sage scripts/expand_field_extension_to_base.sage data/<input_system>.in
 
 **How to use:**
 ```sh
-sage sage scripts/system_diagnosis.sage data/<system>.in
+sage scripts/system_diagnosis.sage data/<system>.in
 ```
 
 **Output:** `logs/<system>_DIAGNOSIS.log`
@@ -98,7 +98,7 @@ julia scripts/solve_F5_from_file.jl data/<system>.in
 **Script:** `scripts/convert_to_lex_fglm.sage`  
 
 **What it does:**  
-- Converts a DRL Groebner basis (from Julia) to LEX order using the FGLM algorithm (via Singular).
+- Converts a DRL Groebner basis to LEX order using the FGLM algorithm (via Singular).
 - Saves new basis and logs statistics/timings.
 
 **How to use:**
