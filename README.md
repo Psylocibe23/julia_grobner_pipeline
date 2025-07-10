@@ -43,11 +43,29 @@ Below, each script is described with its role, how to invoke it, and the expecte
 
 **Script:** `scripts/expand_field_extension_to_base.sage`  
 **What it does:**  
-- Converts a polynomial system over \(\mathbb{F}_{p^n}\) to an equivalent system over 𝐹<sub>p</sub>.
+- Converts a polynomial system over 𝐹<sub>pⁿ</sub> to an equivalent system over 𝐹<sub>p</sub>.
 - Writes new system to a `.in` file in `data/`.
 
 **How to use:**
 ```sh
 sage scripts/expand_field_extension_to_base.sage data/<input_system>.in
 
+**Output:** `data/<input_system>_expanded.in`
 
+### 2. **System Diagnostics** 
+**Script:** `scripts/system_diagnosis.sage`  
+**What it does:**  
+- Prints and logs properties of the polynomial system and the corresponding ideal:
+    - Number of variables/equations
+    - Degree statistics
+    - Sparsity
+    - Homogeneity
+    - Krull dimension
+    - Zero-dimensionality
+    - Quadratic/Boolean check
+
+**How to use:**
+```sh
+sage sage scripts/system_diagnosis.sage data/<system>.in
+
+**Output:** `logs/<system>_DIAGNOSIS.log`
