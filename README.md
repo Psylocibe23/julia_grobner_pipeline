@@ -12,7 +12,7 @@ This repository implements a **modular pipeline for solving systems of polynomia
 2. **System Diagnostics & Metadata Extraction** (SageMath):  
    Computes structural properties of the polynomial system and ideal (e.g., dimension, degree, homogeneity, etc.).
 
-3. **Groebner Basis Computation (F4/F5)** (Julia/AlgebraicSolving.jl):  
+3. **Grobner Basis Computation (F4/F5)** (Julia/AlgebraicSolving.jl):  
    Computes a Gröbner basis in degree reverse lexicographic (DRL) order.  
    - F4 (matrix-based, multi-threaded)  
    - F5 (signature-based, single-threaded)
@@ -49,6 +49,7 @@ Below, each script is described with its role, how to invoke it, and the expecte
 **How to use:**
 ```sh
 sage scripts/expand_field_extension_to_base.sage data/<input_system>.in
+```
 
 **Output:** `data/<input_system>_expanded.in`
 
@@ -67,5 +68,91 @@ sage scripts/expand_field_extension_to_base.sage data/<input_system>.in
 **How to use:**
 ```sh
 sage sage scripts/system_diagnosis.sage data/<system>.in
+```
 
 **Output:** `logs/<system>_DIAGNOSIS.log`
+
+### 3. **Grobner Basis Computation (F4/F5)**
+
+**Scripts:** 
+- `scripts/solve_F4_from_file.jl`  
+- `scripts/solve_F5_from_file.jl`
+
+**What they do:**  
+- Compute a Grobner basis in DRL (degrevlex) order using F4 (multi-threaded) or F5 (signature-based).
+- Logs the computation and saves basis in a results file.
+
+**How to use:**
+```sh
+julia scripts/solve_F4_from_file.jl data/<system>.in <num_threads>
+
+julia scripts/solve_F5_from_file.jl data/<system>.in
+```
+
+**Outputs:** 
+- `results/<system>_F4_<timestamp>.txt`
+- `results/<system>_F5_<timestamp>.txt`
+
+### 4. **FGLM Conversion (DRL → LEX Order)**
+
+**Script:** `scripts/convert_to_lex_fglm.sage`  
+
+**What it does:**  
+- Converts a DRL Groebner basis (from Julia) to LEX order using the FGLM algorithm (via Singular).
+- Saves new basis and logs statistics/timings.
+
+**How to use:**
+```sh
+sage scripts/convert_to_lex_fglm.sage results/<system>_F4_<timestamp>.txt
+```
+
+**Outputs:** 
+- `results/<system>_F4_<timestamp>_LEX.txt`
+- `logs/<system>_F4_<timestamp>_FGLM.log`
+
+### 5. **Solution Extraction**
+
+**Script:** `scripts/extract_solutions_from_lex.sage`  
+
+**What it does:**  
+- Extracts all solutions from the LEX Groebner basis file (using variety() or brute-force if needed).
+- Verifies correctness and logs stats.
+
+**How to use:**
+```sh
+sage scripts/extract_solutions_from_lex.sage results/<system>_F4_<timestamp>_LEX.txt
+```
+
+**Outputs:** 
+- `results/<system>_F4_<timestamp>_LEX_sols.txt`
+- `logs/<system>_F4_<timestamp>_LEX_SOLUTIONS.log`
+
+### 6. **Mapping Solutions to Extension Field**
+
+**Script:** `scripts/map_base_field_solutions_to_extension.sage`  
+
+**What it does:**  
+- For systems originally defined over 𝐹<sub>pⁿ</sub>, maps solutions in base field coordinates back to original extension field variables.
+
+**How to use:**
+```sh
+sage scripts/map_base_field_solutions_to_extension.sage results/<system>_F4_<timestamp>_LEX_sols.txt data/<original_system>.in
+```
+
+**Output:** 
+- `results/<system>_F4_<timestamp>_LEX_sols_mapped.txt`
+
+### 7. **Expansion Correctness Verification**
+
+**Script:** `scripts/check_expansion_correctness.sage`  
+
+**What it does:**  
+- Verifies that the expanded system over 𝐹<sub>p</sub> is equivalent to the original over 𝐹<sub>pⁿ</sub>, by checking assignments (exhaustively for small systems).
+
+**How to use:**
+```sh
+sage scripts/check_expansion_correctness.sage data/<original_system>.in data/<original_system>_expanded.in
+```
+
+**Output:** 
+- Prints verification result to console.
