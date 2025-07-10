@@ -7,6 +7,7 @@ _sage_const_1 = Integer(1); _sage_const_0 = Integer(0); _sage_const_2 = Integer(
 import sys
 import time
 import os
+import re
 
 def parse_field_vars_basis(filename):
     """
@@ -31,9 +32,12 @@ def parse_field_vars_basis(filename):
     else:
         # Fallback: try to parse from polynomials
         poly_vars = set()
+
         for poly in lines:
-            for v in poly.replace("^"," ").replace("*"," ").replace("+"," ").replace("-"," ").replace("("," ").replace(")"," ").split():
-                if v.isalpha(): poly_vars.add(v)
+            # Extract all words that match variable patterns (alphanumeric and underscores)
+            for v in re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', poly):
+                poly_vars.add(v)
+
         vars = sorted(poly_vars)
     # Prefer explicit field header, fallback to 2 if missing
     if char_line:

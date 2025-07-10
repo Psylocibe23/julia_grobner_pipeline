@@ -103,6 +103,7 @@ def main():
         print(g)
     with open(lex_outfile, "w") as out:
         out.write(f"# Lex Groebner basis for {result_file}\n")
+        out.write(f"# Variables: {', '.join(variables)}\n")
         out.write(f"# Field: GF({p})\n")
         for g in G_lex_fglm:
             out.write(str(g) + "\n")
