@@ -7,7 +7,7 @@ This repository implements a **modular pipeline for solving systems of polynomia
 ## Pipeline Overview
 
 1. **Field Extension Expansion** (SageMath):  
-   Transforms systems over extension fields \(\mathbb{F}_{p^n}\) into equivalent systems over the base field \(\mathbb{F}_p\), introducing extra variables/equations as needed.
+   Transforms systems over extension fields 𝐹<sub>pⁿ</sub> into equivalent systems over the base field 𝐹<sub>p</sub>, introducing extra variables/equations as needed.
 
 2. **System Diagnostics & Metadata Extraction** (SageMath):  
    Computes structural properties of the polynomial system and ideal (e.g., dimension, degree, homogeneity, etc.).
@@ -24,7 +24,7 @@ This repository implements a **modular pipeline for solving systems of polynomia
    Extracts and verifies all solutions of the system from the lex basis.
 
 6. **Mapping Solutions Back to Extension Field** (SageMath):  
-   For systems originally over \(\mathbb{F}_{p^n}\), reconstructs extension field solutions from base field coordinates.
+   For systems originally over 𝐹<sub>pⁿ</sub>, reconstructs extension field solutions from base field coordinates.
 
 7. **Correctness & Expansion Verification** (SageMath):  
    Checks correctness of field extension expansion and solution mappings.
@@ -43,7 +43,7 @@ Below, each script is described with its role, how to invoke it, and the expecte
 
 **Script:** `scripts/expand_field_extension_to_base.sage`  
 **What it does:**  
-- Converts a polynomial system over \(\mathbb{F}_{p^n}\) to an equivalent system over \(\mathbb{F}_p\).
+- Converts a polynomial system over \(\mathbb{F}_{p^n}\) to an equivalent system over 𝐹<sub>p</sub>.
 - Writes new system to a `.in` file in `data/`.
 
 **How to use:**
