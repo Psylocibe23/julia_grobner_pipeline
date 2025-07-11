@@ -46,7 +46,7 @@ def expand_system(var_names, p, n, polys):
         expr = sum(PR_p(f"{v}_{j}") * a**j for j in range(n))
         subst[vars_K[v]] = expr
 
-    # --- Vector space extraction for coordinate expansion ---
+    # Vector space extraction for coordinate expansion
     VS = Fpn.vector_space()
     if isinstance(VS, tuple):
         V = VS[1]
@@ -87,7 +87,7 @@ def expand_system(var_names, p, n, polys):
 
 
 def write_output_file(var_names, p, n, polys, output_path):
-    """Write expanded system in .in format for msolve/Julia pipeline."""
+    """Write expanded system in .in format for Julia pipeline."""
     with open(output_path, "w") as f:
         f.write(", ".join(var_names) + "\n")
         f.write(str(p) + "\n")

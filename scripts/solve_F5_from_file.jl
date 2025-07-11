@@ -2,11 +2,11 @@ using AlgebraicSolving
 import Base.Filesystem: mkpath
 using Dates
 
-# --- Setup output folders
+# --- Setup output folders ---
 mkpath("logs")
 mkpath("results")
 
-# --- Parse command-line arguments
+# --- Parse command-line arguments ---
 function parse_args()
     if length(ARGS) < 1
         println("Usage: julia solve_F4_from_file.jl <inputfile> [nthreads]")
@@ -21,7 +21,7 @@ lines = readlines(filename)
 var_names = [strip(v) for v in split(strip(lines[1]), ",")]
 p = parse(Int, strip(lines[2]))
 
-# --- Field and polynomial ring
+# --- Field and polynomial ring ---
 if p == 2
     K = GF(2)
 else
@@ -30,12 +30,12 @@ end
 
 R, vars = polynomial_ring(K, var_names)
 
-# --- Define variables in Main module for eval
+# --- Define variables in Main module for eval ---
 for (i, v) in enumerate(var_names)
     @eval Main $(Symbol(v)) = vars[$i]
 end
 
-# --- Parse polynomials
+# --- Parse polynomials ---
 polys = Vector{typeof(vars[1])}()
 for line in lines[3:end]
     try
@@ -57,7 +57,7 @@ open(log_file, "w") do logio
         redirect_stderr(logio) do
             println("Loaded system with $(length(var_names)) variables and $(length(polys)) equations over GF($p)")
 
-            # --- F5 computation
+            # F5 computation
             @time sig_basis = sig_groebner_basis(polys; info_level=1)
             G = [f[2] for f in sig_basis]
             println("\nComputed Groebner basis (F5):")
@@ -65,7 +65,7 @@ open(log_file, "w") do logio
                 println(g)
             end
 
-            # --- Verify correctness
+            # Verify correctness
             I = Ideal(polys)
             for f in getfield(I, :gens)
                 r = normal_form(f, I)
@@ -73,7 +73,7 @@ open(log_file, "w") do logio
             end
             println("\nThe computed Groebner basis is correct!")
 
-            # --- Save Groebner basis to result file
+            # Save Groebner basis to result file
             open(result_file, "w") do fio
                 println(fio, "# Groebner basis (F5) computed for $(filename)")
                 println(fio, "# Variables: ", join(var_names, ", "))

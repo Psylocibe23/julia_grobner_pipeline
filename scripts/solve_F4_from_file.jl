@@ -2,7 +2,7 @@ using AlgebraicSolving
 import Base.Filesystem: mkpath
 using Dates
 
-# --- Parse command-line arguments
+# --- Parse command-line arguments ---
 function parse_args()
     if length(ARGS) < 1
         println("Usage: julia solve_F4_from_file.jl <inputfile> [nthreads]")
@@ -38,12 +38,12 @@ end
 
 R, vars = polynomial_ring(K, var_names)
 
-# Define variables in Main module for eval
+# --- Define variables in Main module for eval ---
 for (i, v) in enumerate(var_names)
     @eval Main $(Symbol(v)) = vars[$i]
 end
 
-# Initialize the correct type for the polynomials vector
+# --- Initialize the polynomials vector ---
 polys = Vector{typeof(vars[1])}()
 
 for line in lines[3:end]

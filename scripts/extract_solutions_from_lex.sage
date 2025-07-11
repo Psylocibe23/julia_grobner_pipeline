@@ -7,7 +7,7 @@ def parse_field_vars_basis(filename):
     """
     Parse variables and field characteristic from the header of the Groebner basis result file.
     Accepts both "# Field characteristic: p" and "# Field: GF(p)".
-    Returns (vars, p, lines) where vars is a list of variable names, p is the characteristic, and lines are the basis polys.
+    Returns (vars, p, lines) where vars is a list of variable names, p is the characteristic, and lines are the basis polynomials.
     """
     with open(filename) as f:
         lines = [l.strip() for l in f if l.strip() and not l.strip().startswith('#')]

@@ -19,7 +19,6 @@ def parse_input_file(filename):
     return var_names, p, n, equations
 
 def get_vector_space(Fpn):
-    """Robustly get the vector space for Fpn over Fp (handles SageMath version differences)."""
     vs = Fpn.vector_space()
     if isinstance(vs, tuple):
         # Sometimes returns (field, VS)
@@ -49,7 +48,7 @@ def verify_expansion(orig_file, exp_file, max_check=100000):
     orig_poly_objs = [PR_K(s) for s in orig_polys]
     exp_poly_objs  = [PR_p(s) for s in exp_polys]
 
-    # Prepare coordinate map (robustly)
+    # Prepare coordinate map
     V = get_vector_space(Fpn)
     total = 0
     match = 0
@@ -97,4 +96,3 @@ def main():
 
 if __name__ == "__main__" or "sage" in __name__:
     main()
-
