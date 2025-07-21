@@ -22,7 +22,7 @@ echo "[$(date)] Running F4 computation (Julia)..."
 julia scripts/solve_F4_from_file.jl data/${SYSTEM_NAME}.in $THREADS
 
 # Find the latest result file matching your naming pattern
-BASIS_FILE=$(ls -1t result_*_${SYSTEM_NAME}_*.out 2>/dev/null | head -n1)
+BASIS_FILE=$(ls -1t results/${SYSTEM_NAME}_F4_*.txt 2>/dev/null | head -n1)
 if [[ ! -f "$BASIS_FILE" ]]; then
     echo "ERROR: Could not find F4 result file for system '$SYSTEM_NAME'."
     exit 1
@@ -36,7 +36,7 @@ echo "[$(date)] Running FGLM conversion (SageMath)..."
 sage scripts/convert_to_lex_fglm.sage "$BASIS_FILE"
 
 # Find the latest LEX result file
-LEX_FILE=$(ls -1t lex_*_${SYSTEM_NAME}_*.out 2>/dev/null | head -n1)
+LEX_FILE=$(ls -1t results/lex_*_${SYSTEM_NAME}_*.txt 2>/dev/null | head -n1)
 if [[ ! -f "$LEX_FILE" ]]; then
     echo "ERROR: Could not find LEX Groebner basis file for system '$SYSTEM_NAME'."
     exit 2
@@ -48,7 +48,7 @@ echo "[$(date)] Extracting solutions from LEX basis (SageMath)..."
 sage scripts/extract_solutions_from_lex.sage "$LEX_FILE"
 
 # Find the latest solution file
-SOL_FILE=$(ls -1t solutions_*_${SYSTEM_NAME}_*.txt 2>/dev/null | head -n1)
+SOL_FILE=$(ls -1t results/solutions_*_${SYSTEM_NAME}_*.txt 2>/dev/null | head -n1)
 if [[ ! -f "$SOL_FILE" ]]; then
     echo "ERROR: Could not find solution file for system '$SYSTEM_NAME'."
     exit 3
