@@ -6,8 +6,8 @@
 #SBATCH --mem=8G
 #SBATCH --time=02:00:00
 
-# Set this to the name of your input (without 'data/' prefix)
-SYSTEM_NAME="my_system"       # Change this to your actual input system name
+# Set this to the name of input (without 'data/' prefix)
+SYSTEM_NAME="toy_test_prime_field"  # Change this to input system name
 THREADS=4
 
 # Ensure a clean logs directory exists
@@ -57,4 +57,3 @@ echo "[$(date)] Solution file: $SOL_FILE"
 
 echo "[$(date)] Groebner pipeline complete for system: $SYSTEM_NAME"
 echo "Logs and results are available in the current directory and logs/"
-
