@@ -48,7 +48,7 @@ echo "[$(date)] Extracting solutions from LEX basis (SageMath)..."
 sage scripts/extract_solutions_from_lex.sage "$LEX_FILE"
 
 # Find the latest solution file
-SOL_FILE=$(ls -1t results/solutions_*_${SYSTEM_NAME}_*.txt 2>/dev/null | head -n1)
+SOL_FILE=$(ls -1t results/${SYSTEM_NAME}_F4_*_LEX_sols.txt 2>/dev/null | head -n1)
 if [[ ! -f "$SOL_FILE" ]]; then
     echo "ERROR: Could not find solution file for system '$SYSTEM_NAME'."
     exit 3
