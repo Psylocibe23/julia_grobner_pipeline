@@ -36,7 +36,7 @@ echo "[$(date)] Running FGLM conversion (SageMath)..."
 sage scripts/convert_to_lex_fglm.sage "$BASIS_FILE"
 
 # Find the latest LEX result file
-LEX_FILE=$(ls -1t results/lex_*_${SYSTEM_NAME}_*.txt 2>/dev/null | head -n1)
+LEX_FILE=$(ls -1t results/${SYSTEM_NAME}_F4_*_LEX.txt 2>/dev/null | head -n1)
 if [[ ! -f "$LEX_FILE" ]]; then
     echo "ERROR: Could not find LEX Groebner basis file for system '$SYSTEM_NAME'."
     exit 2
