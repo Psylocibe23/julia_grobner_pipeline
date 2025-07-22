@@ -6,7 +6,7 @@
 #SBATCH --mem=8G
 #SBATCH --time=02:00:00
 
-SYSTEM_NAME="toy_test_prime_field"  # Change this to input system name
+SYSTEM_NAME="toy_test_prime_field"  # Set to input system name
 THREADS=4
 
 mkdir -p logs
@@ -57,6 +57,17 @@ if [[ ! -f "$SOL_FILE" ]]; then
 fi
 echo "[$(date)] Solution file: $SOL_FILE"
 
+# Locate the most recent solution log file for parsing
+SOL_LOG_FILE=$(ls -1t logs/${SYSTEM_NAME}_F4_*_LEX_SOLUTIONS.log 2>/dev/null | head -n1)
+
+# Parse details from the solution log
+NUM_VARS=$(grep "# Variables:" "$SOL_LOG_FILE" | awk -F: '{print $2}' | tr -d " []',")
+NUM_EQS=$(grep "# Number of equations:" "$SOL_LOG_FILE" | awk -F: '{print $2}' | tr -d ' ')
+FIELD=$(grep "# Field characteristic:" "$SOL_LOG_FILE" | awk -F: '{print $2}' | tr -d ' ')
+NUM_SOL=$(grep "# Number of solutions:" "$SOL_LOG_FILE" | awk -F: '{print $2}' | tr -d ' ')
+VERIF=$(grep "# Verification passed:" "$SOL_LOG_FILE" | awk -F: '{print $2}' | tr -d ' ')
+
+# End time and wall time
 END_TIME=$(date "+%Y-%m-%d %H:%M:%S")
 WALLTIME=$(printf '%02d:%02d:%02d' $(($SECONDS/3600)) $(($SECONDS%3600/60)) $(($SECONDS%60)))
 
@@ -67,14 +78,6 @@ FGLM_TIME=$(grep "Elapsed (wall clock) time" logs/fglm_time_mem.log | awk '{prin
 FGLM_RAM=$(grep "Maximum resident set size" logs/fglm_time_mem.log | awk '{print $6}')
 SOL_TIME=$(grep "Elapsed (wall clock) time" logs/sol_time_mem.log | awk '{print $8}')
 SOL_RAM=$(grep "Maximum resident set size" logs/sol_time_mem.log | awk '{print $6}')
-
-# Extract experiment stats from solution log (update as needed based on your actual log content)
-NUM_VARS=$(grep "# Variables:" $SOL_FILE | awk '{print $3}' | head -n1)
-NUM_EQS=$(grep "# Number of equations:" $SOL_FILE | awk '{print $5}' | head -n1)
-FIELD=$(grep "# Field characteristic:" $SOL_FILE | awk '{print $4}' | head -n1)
-NUM_SOL=$(grep "# Number of solutions:" $SOL_FILE | awk '{print $5}' | head -n1)
-VERIF=$(grep "# Verification passed:" $SOL_FILE | awk '{print $4}' | head -n1)
-SOLVING_DEGREE=$(grep "max deg" logs/fglm_time_mem.log | awk '{print $5}' | head -n1) # update if logged elsewhere
 
 # Software versions
 JULIA_VERSION=$(julia -e 'println(VERSION)')
