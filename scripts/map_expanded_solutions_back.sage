@@ -1,8 +1,26 @@
 #!/usr/bin/env sage
+###############################################################################
+# map_expanded_solutions_back.sage
+#
+# Given solutions to an "expanded" system over GF(p) (with n variables per original
+# extension field variable), map each solution back to an assignment for the original
+# variables over GF(p^n).
+#
+# This is essential for interpreting the solutions found by Gröbner basis or
+# algebraic solvers after field flattening.
+###############################################################################
+
 import sys
 import os
 
+###############################################################################
+# 1. Parse .in file for variable names and field info
+###############################################################################
 def parse_in_file(filename):
+    """
+    Parse variable names and field info from an .in file (either original or expanded).
+    Returns: (var_names, p, n)
+    """
     with open(filename) as f:
         lines = [l.strip() for l in f if l.strip()]
     var_names = [v.strip() for v in lines[0].split(",")]
@@ -15,8 +33,15 @@ def parse_in_file(filename):
         n = 1
     return var_names, p, n
 
+###############################################################################
+# 2. Read solutions as {x_0: 1, x_1: 0, ...} from file
+###############################################################################
 def read_solutions(filename):
-    """Read {x_0: 1, x_1: 0, ...} style solutions from file."""
+    """
+    Read solution assignments from a file, one per line, in the format:
+      {x_0: 1, x_1: 0, ...}
+    Returns: a list of dictionaries mapping variable names to values (ints).
+    """
     sols = []
     with open(filename) as f:
         for line in f:
@@ -33,6 +58,9 @@ def read_solutions(filename):
             sols.append(d)
     return sols
 
+###############################################################################
+# 3. Main mapping logic: reconstruct extension field variables from coordinates
+###############################################################################
 def main():
     if len(sys.argv) != 4:
         print("Usage: sage scripts/map_expanded_solutions_back.sage <orig_infile> <expanded_infile> <expanded_solutions_file>")
@@ -53,7 +81,8 @@ def main():
     sols = read_solutions(solfile)
     print(f"Read {len(sols)} solutions from expanded system.")
 
-    # For each solution, reconstruct each original variable as x = x_0 + a*x_1 + ... + a^{n-1}*x_{n-1}
+    # For each solution, reconstruct each original variable as
+    # x = x_0 + a*x_1 + ... + a^{n-1}*x_{n-1}
     mapped_solutions = []
     for sol in sols:
         mapped = {}

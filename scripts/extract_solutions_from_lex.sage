@@ -1,13 +1,28 @@
+###############################################################################
+# extract_solutions_from_lex.sage
+#
+# Given a (reduced) LEX Gröbner basis for a zero-dimensional system,
+# extract all affine solutions (roots), verify correctness, and save outputs.
+# Requirements: SAGE, output of convert_to_lex_fglm.sage
+###############################################################################
+
 import sys
 import time
 import os
 import re
 
+###############################################################################
+# 1. Parse variables and field from basis file header
+###############################################################################
 def parse_field_vars_basis(filename):
     """
-    Parse variables and field characteristic from the header of the Groebner basis result file.
-    Accepts both "# Field characteristic: p" and "# Field: GF(p)".
-    Returns (vars, p, lines) where vars is a list of variable names, p is the characteristic, and lines are the basis polynomials.
+    Parse the list of variable names and the field characteristic from the header of the
+    Groebner basis file. Accepts either '# Field characteristic: p' or '# Field: GF(p)'.
+    If header is missing, falls back to variable detection from the basis.
+    Returns:
+        - vars: list of variable names (in order)
+        - p: characteristic or cardinality of field, possibly with exponent
+        - lines: list of basis polynomials (as strings)
     """
     with open(filename) as f:
         lines = [l.strip() for l in f if l.strip() and not l.strip().startswith('#')]
@@ -43,10 +58,16 @@ def parse_field_vars_basis(filename):
         print("Warning: Field characteristic not found, defaulting to 2.")
     return vars, p, lines
 
+###############################################################################
+# 2. Utility: ensure output directories exist
+###############################################################################
 def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
+###############################################################################
+# 3. Main logic: root extraction, verification, logging
+###############################################################################
 def main():
     if len(sys.argv) < 2:
         print("Usage: sage extract_solutions_from_lex.sage <basis_file>")
@@ -78,11 +99,14 @@ def main():
     I = R.ideal(polynomials)
     print(f"Solving system in {R}...")
 
+    ############### SOLUTION EXTRACTION ##################
     t0 = time.time()
     try:
+        # Most efficient for zero-dimensional systems in small fields
         sols = I.variety()
         method = "variety"
     except Exception as e:
+        # If variety() fails (e.g., for large or degenerate systems), fall back to brute force
         print("variety() failed, trying brute force...")
         import itertools
         sols = []
@@ -113,7 +137,8 @@ def main():
     print(f"Solutions saved to {result_file}")
     print(f"Number of solutions: {len(sols)}")
 
-    # Verify all solutions
+    ################ VERIFY ALL SOLUTIONS ##################
+    # For cryptographic applications and debugging, we double-check that each solution is valid
     all_verified = True
     for sol in sols:
         strsol = {str(k): v for k, v in sol.items()}
@@ -125,7 +150,7 @@ def main():
 
     print("Verification completed." if all_verified else "Some solutions did not verify.")
 
-    # Save log
+    ################ LOGGING ##################
     with open(log_file, "w") as log:
         log.write(f"# Solution extraction log for {basisfile}\n")
         log.write(f"# Input LEX basis: {basisfile}\n")

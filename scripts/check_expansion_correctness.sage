@@ -1,8 +1,28 @@
 #!/usr/bin/env sage
+###############################################################################
+# check_expansion_correctness.sage
+#
+# This script verifies the correctness of an *expansion* from a system over an
+# extension field GF(p^n) (using n variables of the base field GF(p) to represent
+# each extension variable) to a system entirely over GF(p). It checks, by enumeration,
+# that for each assignment to the extension field variables, the solutions to the
+# original and expanded systems agree.
+###############################################################################
+
 import sys
 import itertools
 
+###############################################################################
+# 1. Parse a system file (variables, field, equations)
+###############################################################################
 def parse_input_file(filename):
+    """
+    Parse a polynomial system file:
+        - First line: variable names (comma separated)
+        - Second line: field (either p or p^n)
+        - Rest: polynomial equations (as strings)
+    Returns: (variable names, base p, extension degree n, equations as strings)
+    """
     with open(filename) as f:
         lines = [l.strip() for l in f if l.strip()]
     var_names = [v.strip() for v in lines[0].split(",")]
@@ -18,7 +38,15 @@ def parse_input_file(filename):
         n = 1
     return var_names, p, n, equations
 
+###############################################################################
+# 2. Get the vector space representation for elements of GF(p^n) over GF(p)
+###############################################################################
 def get_vector_space(Fpn):
+    """
+    For a given extension field Fpn = GF(p^n), return the vector space over GF(p)
+    corresponding to its elements. This allows us to represent any element of Fpn
+    as an n-tuple over Fp (using a fixed basis).
+    """
     vs = Fpn.vector_space()
     if isinstance(vs, tuple):
         # Sometimes returns (field, VS)
@@ -27,7 +55,17 @@ def get_vector_space(Fpn):
         V = vs
     return V
 
+###############################################################################
+# 3. Main expansion correctness check
+###############################################################################
 def verify_expansion(orig_file, exp_file, max_check=100000):
+    """
+    For each assignment to the original system's variables over GF(p^n),
+    compute the corresponding base field coordinates, substitute into the
+    expanded system, and check if the solution status matches.
+
+    Stops after max_check assignments for large search spaces.
+    """
     # Parse original (extension field) system
     orig_vars, p, n, orig_polys = parse_input_file(orig_file)
     exp_var_names, p_exp, n_exp, exp_polys = parse_input_file(exp_file)
@@ -86,6 +124,9 @@ def verify_expansion(orig_file, exp_file, max_check=100000):
     print(f"\nChecked {total} assignments. Matches: {match}.")
     print("Expansion is CORRECT: original and expanded systems agree for all assignments checked.")
 
+###############################################################################
+# 4. Main entry point
+###############################################################################
 def main():
     if len(sys.argv) != 3:
         print("Usage: sage scripts/check_expansion_correctness.sage <original.in> <expanded.in>")

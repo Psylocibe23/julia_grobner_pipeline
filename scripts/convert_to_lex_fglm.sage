@@ -1,8 +1,27 @@
+###############################################################################
+# convert_to_lex_fglm.sage
+#
+# Given a DRL Gröbner basis (e.g., output of F4 or F5), this script converts
+# the basis to LEX order using the FGLM algorithm, checks for "shape position,"
+# and logs key algebraic and computational statistics.
+# Requirements: SAGE, DRL basis output as produced by pipeline
+###############################################################################
+
 import sys
 import time
 import os
 
+############################
+# 1. Parse the DRL basis output file
+############################
 def read_groebner_basis_file(result_file):
+    """
+    Parse an output file containing a DRL Gröbner basis.
+    Returns:
+        variables: list of variable names (str)
+        p: characteristic of the base field
+        polys: list of basis polynomials as strings
+    """
     with open(result_file, 'r') as f:
         lines = f.readlines()
         variables = None
@@ -27,17 +46,32 @@ def read_groebner_basis_file(result_file):
             polys.append(s)
     return variables, p, polys
 
+############################
+# 2. Shape position check
+############################
 def is_shape_position(G_lex):
+    """
+    A system is in shape position if its LEX Gröbner basis is in 'triangular' form:
+    each basis element involves only one new variable (i.e., univariate), which allows
+    a "back-substitution" solution (like in triangular linear systems).
+    This is a sufficient condition for efficiently extracting all solutions by root finding.
+    """
     # Simple check: all polys are univariate (shape position for typical cryptanalytic systems)
     try:
         return all(len(g.lm().variables()) == 1 for g in G_lex)
     except Exception:
         return False
 
+############################
+# 3. Utility: ensure output directories exist
+############################
 def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
+############################
+# 4. Main conversion and logging logic
+############################
 def main():
     if len(sys.argv) != 2:
         print("Usage: sage scripts/convert_to_lex_fglm.sage path/to/result_file.txt")
@@ -109,6 +143,7 @@ def main():
             out.write(str(g) + "\n")
     print(f"\nSaved to {lex_outfile}")
 
+    # Save all diagnostic and complexity information
     with open(log_outfile, "w") as log:
         log.write(f"# FGLM conversion log for {result_file}\n")
         log.write(f"# Input DRL Groebner basis: {input_basis_size} polys, max deg = {input_max_deg}, degrees = {input_degrees}\n")
