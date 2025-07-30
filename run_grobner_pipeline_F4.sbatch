@@ -6,7 +6,7 @@
 #SBATCH --mem=8G
 #SBATCH --time=02:00:00
 
-SYSTEM_NAME="toy_test_prime_field"  # Set to input system name
+SYSTEM_NAME="HFE_n4_d4_system"  # Set to input system name
 THREADS=4
 
 mkdir -p logs

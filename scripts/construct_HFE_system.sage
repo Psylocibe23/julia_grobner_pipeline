@@ -74,6 +74,29 @@ def random_affine_map(n, Fp):
     b = vector(Fp, [Fp.random_element() for _ in range(n)])
     return (A, b)
 
+def extract_coordinate_polys(fy, a, n, xvars):
+    """
+    Given fy: a polynomial over K[x_0,...,x_{n-1}],
+    express it as a vector of n polynomials over Fq[x_0,...,x_{n-1}],
+    corresponding to the canonical basis 1, a, ..., a^{n-1}.
+    """
+    K = a.parent()
+    Fq = K.base_ring()
+    R = xvars[0].parent()
+    result = [R(0) for _ in range(n)]  # polynomials for each coordinate
+    for monom, coeff in fy.dict().items():
+        # coeff is in K, expand in basis
+        coeff_vec = K(coeff)._vector_()  # <-- THIS IS THE FIX!
+        for idx in range(n):
+            if coeff_vec[idx] != 0:
+                mono_poly = R({monom: 1})
+                result[idx] += Fq(coeff_vec[idx]) * mono_poly
+    return result
+
+
+
+
+
 def export_symbolic_public_map(n, q, F, A_S, b_S, A_T, b_T, K, a, outfilename):
     """
     Export the public HFE map as n explicit polynomials in n variables,
@@ -83,28 +106,22 @@ def export_symbolic_public_map(n, q, F, A_S, b_S, A_T, b_T, K, a, outfilename):
     R = PolynomialRing(Fp, n, 'x')
     xvars = R.gens()
     var_names = [str(v) for v in xvars]
+    basis = [a^i for i in range(n)]
 
     print(f"Exporting public key: {n} polynomials in {n} variables...")
 
     public_polys = []
     for idx in range(n):
-        # Input: vector of symbolic variables (over R)
         xvec = list(xvars)
-        # Apply secret affine input map S
         s = A_S * vector(R, xvec) + vector(R, list(b_S))
-        # Embed into extension field as element: sum s[i]*a^i
-        s_field = sum([s[i]*a**i for i in range(n)])
-        # Evaluate secret HFE poly
+        s_field = sum([s[i] * a**i for i in range(n)])
         fy = F(s_field)
-        # Convert back to vector over Fp^n (coefficients in canonical basis)
-        coeffs = K.polynomial()(fy).list()
-        fy_vec = vector(Fp, coeffs + [0]*(n-len(coeffs)))
-        # Apply secret output affine map T
-        z = A_T * fy_vec + b_T
-        # Output is a vector of Fp elements; for public polynomial idx, get as polynomial
-        public_polys.append(R(z[idx]))
+        # << THIS IS THE KEY FIX >>
+        fy_vec = extract_coordinate_polys(fy, a, n, xvars)
+        fy_vec = vector(R, fy_vec)
+        z = A_T * fy_vec + vector(R, list(b_T))
+        public_polys.append(z[idx])
 
-    # Write public system to .in file
     os.makedirs(os.path.dirname(outfilename), exist_ok=True)
     with open(outfilename, "w") as f:
         f.write(", ".join(var_names) + "\n")
@@ -113,14 +130,20 @@ def export_symbolic_public_map(n, q, F, A_S, b_S, A_T, b_T, K, a, outfilename):
             f.write(str(poly) + "\n")
     print(f"Exported system to {outfilename}")
 
+
+
+
+
+
+
 ################################################################################
 # MAIN LOGIC
 ################################################################################
 if __name__ == "__main__":
     # --- User-set parameters (adjust as needed) ---
     q = 2             # Field characteristic (2 for binary HFE)
-    n = 4             # Number of variables (extension degree, e.g., 80)
-    d = 6             # Maximum degree of secret univariate polynomial F (e.g., 96)
+    n = 4             # Number of variables 
+    d = 4             # Maximum degree of secret univariate polynomial F
     # ------------------------------------------------
 
     # --- 1. Construct extension field and generator ---
