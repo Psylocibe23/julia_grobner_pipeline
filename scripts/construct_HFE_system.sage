@@ -50,31 +50,38 @@ def construct_extension_field(q, n, prim_poly=None):
         return K, a, mod_poly
 
 # --- 2. Random HFE Polynomial ------------------------------------------------
-def random_hfe_poly(K, n):
+def random_hfe_poly(K, n, d=None, q=2):
     """
-    Construct a random HFE polynomial F(X) over K=GF(2^n):
-    - The degree of F(X) is restricted to the form sum_{i≤j} c_{ij} X^{2^i + 2^j}
-      (i.e., exponents that are sums of powers of two; this guarantees that F(X)
-      is quadratic when "pulled back" to the base field).
-    - Also includes random linear and constant terms.
+    Generate a random HFE polynomial F(x) over K = GF(q^n), degree at most d (if specified).
+    If d is None, allows maximal degree.
     """
     R.<x> = K[]
     F = R(0)
-    # Quadratic terms
+    exponents_seen = set()
+
+    # Quadratic terms: exponents of the form q^i + q^j
     for i in range(n):
         for j in range(i, n):
+            exp = q**i + q**j
+            if (d is not None) and (exp > d):
+                continue
             coeff = K.random_element()
-            if coeff != 0:  
-                exp = 2^i + 2^j
+            if coeff != 0:
                 F += coeff * x^exp
-    # Linear terms
+                exponents_seen.add(exp)
+    # Linear terms: exponents of the form q^k
     for k in range(n):
+        exp = q**k
+        if (d is not None) and (exp > d):
+            continue
         coeff = K.random_element()
         if coeff != 0:
-            F += coeff * x^(2^k)
-    # Constant term
+            F += coeff * x^exp
+            exponents_seen.add(exp)
+    # Constant term (always present)
     F += K.random_element()
     return F
+
 
 # --- 3. Random (Secret) Affine Maps S, T -------------------------------------
 def random_affine_map(n, Fp):
@@ -155,7 +162,7 @@ def public_map(xvec):
 def export_public_map_to_infile(n, public_map, outfilename):
     """
     For cryptanalysis: enumerate the truth table of the HFE public map,
-    interpolate each output coordinate as a Boolean polynomial (ANF),
+    interpolate each output coordinate as a Boolean polynomial (Algebraic Normal Form),
     and save the system in standard ".in" format for pipelines.
       Line 1: variable names (x_0,...,x_{n-1})
       Line 2: field (2 for GF(2))
@@ -199,7 +206,8 @@ def export_public_map_to_infile(n, public_map, outfilename):
 if __name__=="__main__":
     # --- USER-ADJUSTABLE PARAMETERS ------------------------------------------
     q = 2  # Usually HFE is used over GF(2), but can generalize
-    n = 4  # Number of variables (and extension degree)
+    n = 80  # Number of variables (and extension degree)
+    d = 96
     # For cryptanalysis research, n = 3..8 for experiments; real-world HFE uses larger n
 
 
@@ -210,7 +218,7 @@ if __name__=="__main__":
     print(f"a^({q**n}) = {a**(q**n)} (should equal a for the correct minimal polynomial)")
 
     # --- 2. Random HFE polynomial generation --------------------------------
-    F = random_hfe_poly(K, n)
+    F = random_hfe_poly(K, n, d)
     print(f"Random HFE poly F(X): {F}")
 
     # --- 3. Random affine maps S, T -----------------------------------------
@@ -223,6 +231,24 @@ if __name__=="__main__":
     print("Affine output map T(y) = A_T * y + b_T")
     print(A_T)
     print(b_T)
+
+    # --- 3b. Save secret HFE instance information for debugging ---
+    os.makedirs("logs", exist_ok=True)
+    log_filename = f"logs/HFE_n{n}_system_information.txt"
+    with open(log_filename, "w") as logf:
+        logf.write(f"=== HFE Instance Information (n={n}) ===\n\n")
+        logf.write("Field:\n")
+        logf.write(f"  GF({q}^{n}), primitive element 'a'\n")
+        logf.write(f"  Modulus polynomial: {modulus}\n\n")
+        logf.write("Secret HFE Polynomial F(X):\n")
+        logf.write(f"  F(X) = {F}\n\n")
+        logf.write("Secret Affine Map S(x) = A_S * x + b_S:\n")
+        logf.write(f"A_S =\n{A_S}\n")
+        logf.write(f"b_S = {b_S}\n\n")
+        logf.write("Secret Affine Map T(y) = A_T * y + b_T:\n")
+        logf.write(f"A_T =\n{A_T}\n")
+        logf.write(f"b_T = {b_T}\n")
+    print(f"Saved HFE system information to {log_filename}")
 
     # --- 4. Define global variables for use in functions above ---------------
     Fpn = K
