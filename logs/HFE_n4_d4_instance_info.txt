@@ -1,0 +1,24 @@
+=== HFE Instance Information (n=4, d=4) ===
+
+Field:
+  GF(2^4), primitive element 'a'
+  Modulus polynomial: x^4 + x + 1
+
+Secret HFE Polynomial F(X):
+  F(X) = (a^2 + a)*x^4 + (a^3 + a^2 + a + 1)*x^3 + a^3*x^2 + (a^3 + a^2)*x + a^3 + a
+
+Secret Affine Map S(x) = A_S * x + b_S:
+A_S =
+[0 0 0 1]
+[0 1 1 0]
+[1 1 1 0]
+[1 0 1 0]
+b_S = (1, 1, 0, 1)
+
+Secret Affine Map T(y) = A_T * y + b_T:
+A_T =
+[1 1 0 0]
+[0 0 1 0]
+[0 1 0 1]
+[1 0 1 0]
+b_T = (1, 1, 0, 1)
