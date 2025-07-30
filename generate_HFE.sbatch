@@ -6,6 +6,7 @@
 #SBATCH --time=01:00:00             
 #SBATCH --mem=8G                    
 
-module load sage
+module load sagemath/10.6-singularity
+
 
 sage scripts/construct_HFE_system.sage
