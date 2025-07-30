@@ -92,7 +92,6 @@ def export_symbolic_public_map(n, q, F, A_S, b_S, A_T, b_T, K, a, outfilename):
     Symbolically expand and export the public HFE map as n explicit multivariate polynomials
     in the public variables, for large n (e.g., n=80).
     """
-    # Set up the base field and polynomial ring for n public variables
     Fp = GF(q)
     R = PolynomialRing(Fp, n, 'x')
     xvars = R.gens()
@@ -102,22 +101,22 @@ def export_symbolic_public_map(n, q, F, A_S, b_S, A_T, b_T, K, a, outfilename):
 
     public_polys = []
     for idx in range(n):
-        # 1. Input as symbolic vector of variables
+        # 1. Input as symbolic vector of variables over R, NOT Fp
         xvec_sym = list(xvars)
-        # 2. S: affine input transformation
-        sx = A_S * vector(Fp, xvec_sym) + b_S
+        # 2. S: affine input transformation over R
+        sx = A_S * vector(R, xvec_sym) + vector(R, list(b_S))
         # 3. Embed into extension field
         sx_field = sum([sx[i] * a**i for i in range(n)])
         # 4. Evaluate HFE polynomial (symbolically)
         fy = F(sx_field)
         # 5. Convert back to vector over Fp^n (coordinate-wise, with respect to basis)
-        # (Use K.polynomial() to get vector space representation)
         fy_coeffs = K.polynomial()(fy).list()
         fy_vec = vector(Fp, fy_coeffs + [0]*(n - len(fy_coeffs)))
-        # 6. Output affine map
+        # 6. Output affine map over Fp
         z = A_T * fy_vec + b_T
-        # 7. Each coordinate z[idx] is a symbolic polynomial in x_0,...,x_{n-1}
-        public_polys.append(z[idx].polynomial())
+        # 7. Each coordinate z[idx] is a constant in Fp, but we need as poly in xvars
+        # To ensure it's a polynomial over R:
+        public_polys.append(R(z[idx]))
 
     # Write to .in file
     os.makedirs(os.path.dirname(outfilename), exist_ok=True)
@@ -127,6 +126,7 @@ def export_symbolic_public_map(n, q, F, A_S, b_S, A_T, b_T, K, a, outfilename):
         for poly in public_polys:
             f.write(str(poly) + "\n")
     print(f"Exported system to {outfilename}")
+
 
 ################################################################################
 # MAIN LOGIC
