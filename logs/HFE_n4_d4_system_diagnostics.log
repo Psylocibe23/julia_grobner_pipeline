@@ -1,0 +1,16 @@
+System: data/HFE_n4_d4_system.in
+Field: GF(2)
+Variables: ['x0', 'x1', 'x2', 'x3']
+Number of variables: 4
+Number of equations: 4
+Degrees of input polynomials: [4, 4, 4, 4]
+Max degree: 4, Min degree: 4
+Sparsity: Terms per polynomial: [13, 13, 16, 16]
+Homogeneous polynomials: [False, False, False, False]
+All polynomials homogeneous? False
+Krull dimension of the ideal: 0
+System is zero-dimensional (finite number of solutions).
+Could not compute ideal degree (Hilbert polynomial): ideal must be homogeneous
+Shape position check skipped (lex Groebner basis not computed).
+System is Boolean quadratic? No
+System is quadratic (all degree ≤2)? No

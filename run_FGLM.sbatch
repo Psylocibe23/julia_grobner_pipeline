@@ -6,4 +6,4 @@
 #SBATCH --time=01:00:00
 #SBATCH --mem=4G
 
-sage scripts/convert_to_lex_fglm.sage results/your_system_F4_<timestamp>.txt
+sage scripts/convert_to_lex_fglm.sage results/HFE_n4_d4_system_F4_20250731_000946.txt
