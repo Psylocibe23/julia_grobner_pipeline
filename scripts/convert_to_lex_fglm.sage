@@ -27,22 +27,24 @@ def read_groebner_basis_file(result_file):
         variables = None
         p = None
         polys = []
+        basis_start = None
         for i, line in enumerate(lines):
             if line.startswith("# Variables:"):
                 variables = [v.strip() for v in line.split(":",1)[1].split(",")]
             elif line.startswith("# Field characteristic:"):
                 p = int(line.split(":")[1].strip())
             elif line.startswith("# Field: GF("):
+                # Support both "# Field characteristic:" and "# Field: GF(...)" lines
                 p = int(line.split("GF(")[1].split(")")[0].strip())
             elif line.startswith("# --- Groebner basis ---"):
                 basis_start = i + 1
                 break
         else:
             raise ValueError("Could not find basis start in file.")
-    # The rest are basis polynomials
+    # The rest are basis polynomials as strings
     for line in lines[basis_start:]:
         s = line.strip()
-        if s:
+        if s and not s.startswith("#"):
             polys.append(s)
     return variables, p, polys
 
@@ -77,11 +79,14 @@ def main():
         print("Usage: sage scripts/convert_to_lex_fglm.sage path/to/result_file.txt")
         sys.exit(1)
     result_file = sys.argv[1]
+
+    # === Parse input basis file (with robust diagnostics) ===
     variables, p, polys = read_groebner_basis_file(result_file)
     print(f"Inferred variables: {variables}")
     print(f"Field characteristic: {p}")
+    print(f"Number of input polynomials: {len(polys)}")
 
-    # Prepare output filenames in results/logs
+    # === Prepare output filenames in results/logs ===
     base_name = os.path.splitext(os.path.basename(result_file))[0]
     results_dir = "results"
     logs_dir = "logs"
@@ -90,47 +95,43 @@ def main():
     lex_outfile = os.path.join(results_dir, base_name + "_LEX.txt")
     log_outfile = os.path.join(logs_dir, base_name + "_FGLM.log")
 
-    # Input DRL basis stats
+    # === Input DRL basis stats ===
     input_basis_size = len(polys)
     input_degrees = []
     try:
-        R_temp = PolynomialRing(GF(p), variables)
+        # DRL ring for statistics only
+        R_temp = PolynomialRing(GF(p), variables, order='deglex')
         input_degrees = [R_temp(s).total_degree() for s in polys]
         input_max_deg = max(input_degrees)
-    except Exception:
+    except Exception as e:
         input_degrees = []
         input_max_deg = None
+        print(f"Warning: could not compute DRL degree stats: {e}")
 
-    # Construct polynomial ring in LEX order
+    # === Construct polynomial rings ===
+    # We *always* reconstruct rings with the correct variables and order
+    R_drl = PolynomialRing(GF(p), variables, order='deglex')
+    G_drl = [R_drl(s) for s in polys]
+    I_drl = R_drl.ideal(G_drl)
+
+    # Now switch to LEX for FGLM
     R_lex = PolynomialRing(GF(p), variables, order='lex')
-    G_lex = [R_lex(s) for s in polys]
-    I_lex = Ideal(G_lex)
+    # Map polynomials to the LEX ring (parse as strings)
+    G_lex = [R_lex(str(p)) for p in G_drl]
+    I_lex = R_lex.ideal(G_lex)
 
-    # FGLM and stats
+    # === FGLM computation ===
     t0 = time.time()
     G_lex_fglm = I_lex.groebner_basis(algorithm="singular:stdfglm")
     t1 = time.time()
     fglm_time = t1 - t0
 
-    # Output LEX basis stats
+    # === Output LEX basis stats ===
     output_basis_size = len(G_lex_fglm)
     output_degrees = [g.total_degree() for g in G_lex_fglm]
     output_max_deg = max(output_degrees)
     shape_pos = is_shape_position(G_lex_fglm)
 
-    # Attempt to compute number of solutions (for zero-dim ideals)
-    num_solutions = None
-    zero_dim = None
-    try:
-        zero_dim = (I_lex.dimension() == 0)
-        if zero_dim:
-            sols = I_lex.variety()
-            num_solutions = len(sols)
-        else:
-            num_solutions = None
-    except Exception:
-        zero_dim = None
-        num_solutions = None
 
     print("\nLEX Groebner basis via FGLM:")
     for g in G_lex_fglm:
@@ -143,7 +144,7 @@ def main():
             out.write(str(g) + "\n")
     print(f"\nSaved to {lex_outfile}")
 
-    # Save all diagnostic and complexity information
+    # === Save all diagnostic and complexity information ===
     with open(log_outfile, "w") as log:
         log.write(f"# FGLM conversion log for {result_file}\n")
         log.write(f"# Input DRL Groebner basis: {input_basis_size} polys, max deg = {input_max_deg}, degrees = {input_degrees}\n")
