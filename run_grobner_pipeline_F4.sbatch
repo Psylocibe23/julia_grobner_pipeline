@@ -4,7 +4,7 @@
 #SBATCH --partition=turing-long
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=8G
-#SBATCH --time=02:00:00
+#SBATCH --time=00:30:00
 
 SYSTEM_NAME="HFE_n5_d8_system"  # Set to input system name
 THREADS=8
@@ -35,7 +35,7 @@ echo "[$(date)] F4 result file: $BASIS_FILE"
 module load sagemath/10.6-singularity
 
 echo "[$(date)] Running FGLM conversion (SageMath)..."
-/usr/bin/time -v sage scripts/convert_to_lex_fglm.sage "$BASIS_FILE" \
+/usr/bin/time -v sage -c "exec(open('scripts/convert_to_lex_fglm.sage').read(), {'__name__':'__main__'})" "$BASIS_FILE" \
     2> logs/fglm_time_mem.log
 
 LEX_FILE=$(ls -1t results/${SYSTEM_NAME}_F4_*_LEX.txt 2>/dev/null | head -n1)
