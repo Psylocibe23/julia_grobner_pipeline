@@ -3,10 +3,10 @@
 #SBATCH --output=logs/pipeline_%j.log
 #SBATCH --partition=turing-long
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=8G
+#SBATCH --mem=16G
 #SBATCH --time=00:30:00
 
-SYSTEM_NAME="HFE_n5_d8_system"  # Set to input system name
+SYSTEM_NAME="HFE_n4_d4_system"  # Set to input system name
 THREADS=8
 
 mkdir -p logs

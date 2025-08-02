@@ -125,14 +125,13 @@ def main():
     G_lex_fglm = I_lex.groebner_basis(algorithm="singular:stdfglm")
     t1 = time.time()
     fglm_time = t1 - t0
-
+    
     # === Output LEX basis stats ===
     output_basis_size = len(G_lex_fglm)
     output_degrees = [g.total_degree() for g in G_lex_fglm]
     output_max_deg = max(output_degrees)
     shape_pos = is_shape_position(G_lex_fglm)
-
-
+    
     print("\nLEX Groebner basis via FGLM:")
     for g in G_lex_fglm:
         print(g)
@@ -143,7 +142,7 @@ def main():
         for g in G_lex_fglm:
             out.write(str(g) + "\n")
     print(f"\nSaved to {lex_outfile}")
-
+    
     # === Save all diagnostic and complexity information ===
     with open(log_outfile, "w") as log:
         log.write(f"# FGLM conversion log for {result_file}\n")
@@ -151,11 +150,10 @@ def main():
         log.write(f"# Output LEX Groebner basis: {output_basis_size} polys, max deg = {output_max_deg}, degrees = {output_degrees}\n")
         log.write(f"# FGLM wall time: {fglm_time:.5f} seconds\n")
         log.write(f"# LEX basis shape position: {shape_pos}\n")
-        log.write(f"# System zero-dimensional: {zero_dim}\n")
-        log.write(f"# Number of solutions: {num_solutions}\n")
         log.write(f"# Input: {result_file}\n")
         log.write(f"# Output: {lex_outfile}\n")
     print(f"FGLM stats log saved to {log_outfile}")
+    
 
 if __name__ == "__main__":
     main()
