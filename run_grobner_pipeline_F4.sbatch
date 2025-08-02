@@ -4,9 +4,9 @@
 #SBATCH --partition=turing-long
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
-#SBATCH --time=00:30:00
+#SBATCH --time=01:00:00
 
-SYSTEM_NAME="HFE_n4_d4_system"  # Set to input system name
+SYSTEM_NAME=${1:-HFE_n4_d4_system}  # Set to input system name
 THREADS=8
 
 mkdir -p logs
