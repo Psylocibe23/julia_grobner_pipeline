@@ -142,8 +142,8 @@ def export_symbolic_public_map(n, q, F, A_S, b_S, A_T, b_T, K, a, outfilename):
 if __name__ == "__main__":
     # --- User-set parameters (adjust as needed) ---
     q = 2             # Field characteristic (2 for binary HFE)
-    n = 5             # Number of variables 
-    d = 8             # Maximum degree of secret univariate polynomial F
+    n = 20             # Number of variables 
+    d = 32            # Maximum degree of secret univariate polynomial F
     # ------------------------------------------------
 
     # --- 1. Construct extension field and generator ---
