@@ -35,8 +35,9 @@ echo "[$(date)] F4 result file: $BASIS_FILE"
 module load sagemath/10.6-singularity
 
 echo "[$(date)] Running FGLM conversion (SageMath)..."
-/usr/bin/time -v sage scripts/convert_to_lex_fglm.sage "$BASIS_FILE" \
+/usr/bin/time -v sage -python scripts/convert_to_lex_fglm.sage.py "$BASIS_FILE" \
     2> logs/fglm_time_mem.log
+
 
 LEX_FILE=$(ls -1t results/${SYSTEM_NAME}_F4_*_LEX.txt 2>/dev/null | head -n1)
 if [[ ! -f "$LEX_FILE" ]]; then
