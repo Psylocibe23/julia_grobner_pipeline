@@ -2,6 +2,7 @@
 # fast_extract_solutions_from_shape_lex.sage
 #
 # Efficiently extract all solutions from a LEX Gröbner basis in shape position.
+# Works for "triangular" systems: e.g. x0 + f0(x1,...,xn), ..., xn-1 + fn-1(xn), g(xn)
 # Requirements: SAGE, output from convert_to_lex_fglm.sage
 ###############################################################################
 
@@ -21,6 +22,30 @@ def parse_lex_basis(filename):
             polys.append(line.strip())
     return variables, p, polys
 
+def is_shape_position(polys, variables):
+    """
+    Accepts LEX triangular shape:
+        x0 + f0(x1,...,xn)
+        x1 + f1(x2,...,xn)
+        ...
+        xn-1 + fn-1(xn)
+        g(xn) (univariate)
+    """
+    n = len(variables)
+    for k in range(n-1):
+        poly = polys[k]
+        var = variables[k]
+        ring_var = poly.parent()(var)   # convert string to polynomial ring variable
+        if poly.degree(ring_var) != 1 or str(ring_var) not in [str(v) for v in poly.variables()]:
+            return False
+    # Last polynomial should be univariate in last variable
+    last_poly = polys[-1]
+    last_var = poly.parent()(variables[-1])
+    if len(last_poly.variables()) != 1 or str(last_poly.variables()[0]) != str(last_var):
+        return False
+    return True
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: sage fast_extract_solutions_from_shape_lex.sage <LEX_basis_file>")
@@ -32,29 +57,37 @@ def main():
     polys = [R(s) for s in poly_strs if s]
     n = len(variables)
 
-    # Ensure shape position: each poly involves <=1 new variable than previous
-    shapes = [set(f.variables()) for f in polys]
-    is_shape = all(len(v) == 1 for v in shapes[:-1]) and len(shapes[-1]) == 1
-    if not is_shape:
+    # Robust shape position check
+    if not is_shape_position(polys, variables):
         print("System is not in shape position. Aborting fast extraction.")
         sys.exit(2)
+
     t0 = time.time()
-    # Last polynomial is univariate: g(x_n)
-    univar_poly = polys[-1]
-    univar_var = list(univar_poly.variables())[0]
-    roots = univar_poly.roots(multiplicities=False)
+
+    # Last polynomial is univariate in last variable
+    last_poly = polys[-1]
+    last_var = R(variables[-1])
+    last_var_name = str(list(last_poly.variables())[0])
+    S = PolynomialRing(F, last_var_name)
+    last_poly_uni = S(last_poly)
+    last_roots = last_poly_uni.roots(multiplicities=False)
     solutions = []
-    for alpha in roots:
-        assign = {univar_var: alpha}
-        for poly in reversed(polys[:-1]):
-            var = list(poly.variables())[0]
-            rhs = -(poly.subs(assign) - var)
-            assign[var] = rhs
-        # Return in order of variables
-        solution = {str(v): assign[R(v)] for v in variables}
+    for alpha in last_roots:
+        assign = {variables[-1]: alpha}
+        # Backward substitution
+        for i in range(n-2, -1, -1):
+            poly = polys[i]
+            var = variables[i]
+            # Evaluate poly at current assignment; solve for var
+            val = -poly.subs(assign)
+            assign[var] = val
+        # Return in order
+        solution = {str(v): assign[v] for v in variables}
         solutions.append(solution)
+
     t1 = time.time()
     print(f"Found {len(solutions)} solutions in {t1-t0:.3f} seconds.")
+
     # Optionally write solutions to file
     out_file = os.path.splitext(basisfile)[0] + "_fastsols.txt"
     with open(out_file, "w") as out:
