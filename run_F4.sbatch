@@ -6,7 +6,7 @@
 #SBATCH --time=01:00:00
 #SBATCH --mem=32G
 
-# Usage: sbatch gb_F4.sbatch data/HFE_n4_d4_system.in 8
+# Usage: sbatch run_F4.sbatch data/HFE_n5_d8_system.in 8
 
 INPUT_FILE="$1"   # e.g., data/HFE_n4_d4_system.in
 THREADS="${2:-8}" # Defaults to 8 if not given
