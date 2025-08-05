@@ -34,17 +34,15 @@ def is_shape_position(polys, variables):
     n = len(variables)
     for k in range(n-1):
         poly = polys[k]
-        var = variables[k]
-        ring_var = poly.parent()(var)   # convert string to polynomial ring variable
-        if poly.degree(ring_var) != 1 or str(ring_var) not in [str(v) for v in poly.variables()]:
+        var = poly.parent().gen(k)
+        if poly.degree(var) != 1 or str(var) not in [str(v) for v in poly.variables()]:
             return False
     # Last polynomial should be univariate in last variable
     last_poly = polys[-1]
-    last_var = poly.parent()(variables[-1])
+    last_var = last_poly.parent().gen(n-1)
     if len(last_poly.variables()) != 1 or str(last_poly.variables()[0]) != str(last_var):
         return False
     return True
-
 
 def main():
     if len(sys.argv) < 2:
@@ -54,6 +52,8 @@ def main():
     variables, p, poly_strs = parse_lex_basis(basisfile)
     F = GF(p)
     R = PolynomialRing(F, variables)
+    # We'll use the ring generators for variable keys
+    ring_vars = R.gens()
     polys = [R(s) for s in poly_strs if s]
     n = len(variables)
 
@@ -66,23 +66,29 @@ def main():
 
     # Last polynomial is univariate in last variable
     last_poly = polys[-1]
-    last_var = R(variables[-1])
-    last_var_name = str(list(last_poly.variables())[0])
-    S = PolynomialRing(F, last_var_name)
-    last_poly_uni = S(last_poly)
+    last_var = ring_vars[-1]
+    # Create univariate polynomial ring for root-finding
+    S = PolynomialRing(F, str(last_var))
+    # Convert last_poly to univariate in S (by variable renaming)
+    last_poly_uni = S(last_poly.subs({last_var: S.gen()}))
     last_roots = last_poly_uni.roots(multiplicities=False)
     solutions = []
     for alpha in last_roots:
-        assign = {variables[-1]: alpha}
-        # Backward substitution
+        # Build assignment dict using *ring variables* as keys
+        assign = {ring_vars[-1]: alpha}
+        # Backward substitution: each poly solves for its leading variable
         for i in range(n-2, -1, -1):
             poly = polys[i]
-            var = variables[i]
-            # Evaluate poly at current assignment; solve for var
-            val = -poly.subs(assign)
+            var = ring_vars[i]
+            # Substitute using current assign, solve for var
+            try:
+                val = -poly.subs(assign)
+            except Exception as e:
+                print(f"Error substituting in poly {poly} with assign {assign}: {e}")
+                raise
             assign[var] = val
-        # Return in order
-        solution = {str(v): assign[v] for v in variables}
+        # Return in order of variables
+        solution = {str(ring_vars[i]): assign[ring_vars[i]] for i in range(n)}
         solutions.append(solution)
 
     t1 = time.time()
