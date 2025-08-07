@@ -1,103 +1,57 @@
-###############################################################################
-# fast_extract_solutions_from_shape_lex.sage
-#
-# Efficiently extract all solutions from a LEX Gröbner basis in shape position.
-# Works for "triangular" systems: e.g. x0 + f0(x1,...,xn), ..., xn-1 + fn-1(xn), g(xn)
-# Requirements: SAGE, output from convert_to_lex_fglm.sage
-###############################################################################
+# fast_extract_zerosdim_solutions.sage
 
-import sys, os, time
+import sys
 
-def parse_lex_basis(filename):
-    # Returns variables (list), field characteristic (int), and polynomials (list of strings)
+def parse_basis_file(filename):
     variables, p, polys = None, None, []
     with open(filename, 'r') as f:
-        lines = f.readlines()
-    for line in lines:
-        if line.startswith("# Variables:"):
-            variables = [v.strip() for v in line.split(":",1)[1].split(",")]
-        elif line.startswith("# Field: GF("):
-            p = int(line.split("GF(")[1].split(")")[0].strip())
-        elif line and not line.startswith("#"):
-            polys.append(line.strip())
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                if line.startswith("# Variables:"):
+                    variables = [v.strip() for v in line.split(":",1)[1].split(",")]
+                elif line.startswith("# Field: GF("):
+                    field_str = line.split("GF(",1)[1].split(")")[0]
+                    if "^" in field_str:
+                        p, n = [int(x.strip()) for x in field_str.split("^")]
+                        p = p**n
+                    else:
+                        p = int(field_str)
+                continue
+            polys.append(line)
+    if variables is None or p is None:
+        raise ValueError("Variables or field not found")
     return variables, p, polys
 
-def is_shape_position(polys, variables):
-    """
-    Accepts LEX triangular shape:
-        x0 + f0(x1,...,xn)
-        x1 + f1(x2,...,xn)
-        ...
-        xn-1 + fn-1(xn)
-        g(xn) (univariate)
-    """
-    n = len(variables)
-    for k in range(n-1):
-        poly = polys[k]
-        var = poly.parent().gen(k)
-        if poly.degree(var) != 1 or str(var) not in [str(v) for v in poly.variables()]:
-            return False
-    # Last polynomial should be univariate in last variable
-    last_poly = polys[-1]
-    last_var = last_poly.parent().gen(n-1)
-    if len(last_poly.variables()) != 1 or str(last_poly.variables()[0]) != str(last_var):
-        return False
-    return True
+def reduce_exponents(poly, p):
+    R = poly.parent()
+    new_monomials = {}
+    for mon, coeff in poly.dict().items():
+        new_mon = tuple(e % p for e in mon)
+        if new_mon in new_monomials:
+            new_monomials[new_mon] += coeff
+        else:
+            new_monomials[new_mon] = coeff
+    # Remove zeros
+    new_monomials = {mon: coeff for mon, coeff in new_monomials.items() if coeff != 0}
+    return R(new_monomials)
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: sage fast_extract_solutions_from_shape_lex.sage <LEX_basis_file>")
+        print("Usage: sage fast_extract_zerosdim_solutions.sage <basis_file>")
         sys.exit(1)
-    basisfile = sys.argv[1]
-    variables, p, poly_strs = parse_lex_basis(basisfile)
+    filename = sys.argv[1]
+    variables, p, polys_str = parse_basis_file(filename)
     F = GF(p)
     R = PolynomialRing(F, variables)
-    # We'll use the ring generators for variable keys
-    ring_vars = R.gens()
-    polys = [R(s) for s in poly_strs if s]
-    n = len(variables)
-
-    # Robust shape position check
-    if not is_shape_position(polys, variables):
-        print("System is not in shape position. Aborting fast extraction.")
-        sys.exit(2)
-
-    t0 = time.time()
-
-    # Last polynomial is univariate in last variable
-    last_poly = polys[-1]
-    last_var = ring_vars[-1]
-    # Create univariate polynomial ring for root-finding
-    S = PolynomialRing(F, str(last_var))
-    # Convert last_poly to univariate in S (by variable renaming)
-    last_poly_uni = S(last_poly.subs({last_var: S.gen()}))
-    last_roots = last_poly_uni.roots(multiplicities=False)
-    solutions = []
-    for alpha in last_roots:
-        # Build assignment dict using *ring variables* as keys
-        assign = {ring_vars[-1]: alpha}
-        # Backward substitution: each poly solves for its leading variable
-        for i in range(n-2, -1, -1):
-            poly = polys[i]
-            var = ring_vars[i]
-            # Substitute using current assign, solve for var
-            try:
-                val = -poly.subs(assign)
-            except Exception as e:
-                print(f"Error substituting in poly {poly} with assign {assign}: {e}")
-                raise
-            assign[var] = val
-        # Return in order of variables
-        solution = {str(ring_vars[i]): assign[ring_vars[i]] for i in range(n)}
-        solutions.append(solution)
-
-    t1 = time.time()
-    print(f"Found {len(solutions)} solutions in {t1-t0:.3f} seconds.")
-
-    # Optionally write solutions to file
-    out_file = os.path.splitext(basisfile)[0] + "_fastsols.txt"
-    with open(out_file, "w") as out:
-        for sol in solutions:
+    polys = [reduce_exponents(R(s), p) for s in polys_str if s]
+    I = R.ideal(polys)
+    print(f"Extracting solutions for {filename} using state-of-the-art methods.")
+    sols = I.variety()
+    print(f"Found {len(sols)} solutions.")
+    out_file = filename.replace('.txt', '_sols.txt')
+    with open(out_file, 'w') as out:
+        for sol in sols:
             out.write("{" + ", ".join(f"{k}: {v}" for k, v in sol.items()) + "}\n")
     print(f"Solutions saved to {out_file}")
 

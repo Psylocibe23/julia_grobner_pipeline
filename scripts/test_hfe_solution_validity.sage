@@ -1,0 +1,182 @@
+################################################################################
+# SAGE: Test solution(s) for HFE public system and secret instance, with S-equivalence check
+################################################################################
+
+import sys
+import re
+import ast
+
+def parse_in_file(infile):
+    with open(infile) as f:
+        lines = [l.strip() for l in f if l.strip()]
+    var_names = [v.strip() for v in lines[0].split(',')]
+    q_line = lines[1]
+    q = int(q_line)
+    F = GF(q)
+    polys = lines[2:]
+    R = PolynomialRing(F, var_names)
+    polynomials = [R(s) for s in polys]
+    return var_names, F, polynomials, R
+
+def parse_solutions_file(solfile):
+    sols = []
+    with open(solfile) as f:
+        for line in f:
+            if "{" in line:
+                fixed = re.sub(r'(\w+):', r'"\1":', line)
+                d = ast.literal_eval(fixed)
+                sols.append(d)
+    return sols
+
+def test_public_system(polynomials, R, solution):
+    assign = {str(k): v for k, v in solution.items()}
+    return all(p(**assign) == 0 for p in polynomials)
+
+def parse_sage_matrix_block(lines, start_idx):
+    mat_rows = []
+    idx = start_idx
+    while idx < len(lines) and lines[idx].strip().startswith("["):
+        row = [int(x) for x in lines[idx].strip().replace("[","").replace("]","").split()]
+        mat_rows.append(row)
+        idx += 1
+    return mat_rows, idx
+
+def parse_vector_line(line):
+    line = line.strip()
+    if '=' in line:
+        line = line.split('=', 1)[1].strip()
+    line = line.replace("(", "").replace(")", "")
+    if "," in line:
+        vals = [int(x.strip()) for x in line.split(",") if x.strip()]
+    else:
+        vals = [int(x) for x in line.split() if x]
+    return vals
+
+def parse_affine_map_block(lines, start_idx):
+    mat_rows = []
+    idx = start_idx
+    while idx < len(lines) and lines[idx].strip().startswith("["):
+        row = [int(x) for x in lines[idx].strip().replace("[", "").replace("]", "").split()]
+        mat_rows.append(row)
+        idx += 1
+    vec_line = lines[idx].strip()
+    vec = parse_vector_line(vec_line)
+    idx += 1
+    return mat_rows, vec, idx
+
+def load_secret_instance(logfile):
+    from sage.all import sage_eval
+    with open(logfile) as f:
+        lines = f.readlines()
+
+    field_line = None
+    mod_line = None
+    F_line = None
+    A_S_mat = None
+    b_S = None
+    A_T_mat = None
+    b_T = None
+    secret_vector = None
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("Field: GF"):
+            field_line = line
+        if "modulus:" in line:  # older logs
+            mod_line = line.split("modulus:")[1].strip()
+        if "Modulus polynomial:" in line:  # newer logs
+            mod_line = line.split("Modulus polynomial:")[1].strip()
+        if "F(X) =" in line:
+            F_line = line.split("F(X) =")[1].strip()
+        # New format
+        if "A_S =" in line:
+            A_S_mat, idx = parse_sage_matrix_block(lines, i + 1)
+            b_S_line = lines[idx].strip()
+            b_S = parse_vector_line(b_S_line)
+            i = idx
+        if "A_T =" in line:
+            A_T_mat, idx = parse_sage_matrix_block(lines, i + 1)
+            b_T_line = lines[idx].strip()
+            b_T = parse_vector_line(b_T_line)
+            i = idx
+        # Old format
+        if "Affine input map (A_S, b_S):" in line:
+            A_S_mat, b_S, idx = parse_affine_map_block(lines, i + 1)
+            i = idx - 1
+        if "Affine output map (A_T, b_T):" in line:
+            A_T_mat, b_T, idx = parse_affine_map_block(lines, i + 1)
+            i = idx - 1
+        if re.match(r"^Secret\s*[:=]", line):
+            m = re.search(r"Secret\s*[:=]\s*\[([0-9,\s]+)\]", line)
+            if m:
+                secret_vector = [int(s) for s in m.group(1).split(",") if s.strip()]
+            else:
+                parts = re.split(r'[:=]', line, maxsplit=1)
+                if len(parts) == 2:
+                    sec_str = parts[1].strip()
+                    sec_str = sec_str.replace("[", "").replace("]", "").replace("(", "").replace(")", "")
+                    secret_vector = [int(s) for s in sec_str.split(",") if s.strip()]
+        i += 1
+
+    if secret_vector is None:
+        raise ValueError("Secret vector not found or could not be parsed from the log file.")
+    if field_line is None or F_line is None or A_S_mat is None or b_S is None or A_T_mat is None or b_T is None:
+        raise ValueError("One or more required entries not found in log file.")
+
+    # Field and modulus
+    if "^" in field_line:
+        qn = field_line.split("GF(")[1].split(")")[0]
+        q, n = map(int, qn.split("^"))
+    else:
+        q = int(field_line.split("GF(")[1].split(")")[0])
+        n = 1
+    Fq = GF(q)
+    if mod_line is not None and mod_line != "":
+        mod_line_z = re.sub(r'\bx\b', 'z', mod_line)
+        K.<a> = GF(q**n, modulus=Fq['z'](mod_line_z))
+    else:
+        K = GF(q**n, 'a')
+        a = K.gen()
+    R = K['x']
+    F_poly = sage_eval(F_line, locals={'x': R.gen(), 'a': K.gen()})
+    A_S = Matrix(Fq, A_S_mat)
+    b_S = vector(Fq, b_S)
+    A_T = Matrix(Fq, A_T_mat)
+    b_T = vector(Fq, b_T)
+    return F_poly, A_S, b_S, A_T, b_T, K, K.gen(), secret_vector
+
+def check_equivalent_under_S(sol, secret_vector, A_S, b_S, var_names):
+    """
+    Check if a solution is equivalent to the secret under the secret affine map S,
+    i.e., if S(sol) == S(secret).
+    """
+    Fp = GF(2)
+    x_sol = vector(Fp, [sol[v] for v in var_names])
+    x_secret = vector(Fp, secret_vector)
+    S_x_sol = A_S * x_sol + b_S
+    S_x_secret = A_S * x_secret + b_S
+    return S_x_sol == S_x_secret
+
+def main():
+    if len(sys.argv) < 4:
+        print("Usage: sage test_hfe_solution_validity.sage <in_file> <solutions_file> <log_file>")
+        sys.exit(1)
+    in_file = sys.argv[1]
+    sols_file = sys.argv[2]
+    log_file = sys.argv[3]
+    var_names, F_field, polynomials, R = parse_in_file(in_file)
+    solutions = parse_solutions_file(sols_file)
+    F, A_S, b_S, A_T, b_T, K, a, secret_vector = load_secret_instance(log_file)
+    for i, sol in enumerate(solutions):
+        public_ok = test_public_system(polynomials, R, sol)
+        is_secret = [sol[v] for v in var_names] == secret_vector
+        equiv_S = check_equivalent_under_S(sol, secret_vector, A_S, b_S, var_names)
+        print(f"Solution #{i+1}: {sol}")
+        print(f"  Satisfies public .in system? {'YES' if public_ok else 'NO'}")
+        print(f"  Is actual secret (matches log)? {'YES' if is_secret else 'NO'}")
+        print(f"  Equivalent to secret under S? {'YES' if equiv_S else 'NO'}")
+        print()
+
+if __name__ == "__main__":
+    main()

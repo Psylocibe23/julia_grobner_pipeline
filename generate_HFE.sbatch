@@ -5,13 +5,15 @@
 #SBATCH --partition=turing-long
 #SBATCH --ntasks=1                  
 #SBATCH --time=02:00:00             
-#SBATCH --cpus-per-task=32           
+#SBATCH --cpus-per-task=32          
 #SBATCH --mem=128G                                 
-
 
 module load sagemath/10.6-singularity
 
-# Run the generator script with Sage
-echo "Starting HFE(n,d) generation on $SLURM_JOB_NODELIST"
-sage -python scripts/construct_HFE_system.sage.py
+# Example values for n and d
+N=6
+D=8
+
+echo "Starting HFE($N,$D) generation on $SLURM_JOB_NODELIST"
+sage scripts/construct_HFE_system.sage $N $D
 echo "✅ Done at $(date)"
