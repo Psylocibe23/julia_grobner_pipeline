@@ -1,182 +1,309 @@
 ###############################################################################
-# convert_to_lex_fglm.sage
+# convert_to_lex_fglm.sage  —  FGLM order change (DRL → LEX) with rich logging
 #
-# Given a DRL Gröbner basis (e.g., output of F4 or F5), this script converts
-# the basis to LEX order using the FGLM algorithm, checks for "shape position,"
-# and logs key algebraic and computational statistics.
-# Requirements: SAGE, DRL basis output as produced by pipeline
+# PURPOSE
+#   Given a Gröbner basis G in DRL (degrevlex) over GF(p) — typically produced
+#   by the F4 stage — convert it to a LEX Gröbner basis via the FGLM algorithm.
+#   Then (a) record useful statistics, (b) perform BOTH a heuristic and a strict
+#   shape-position check, and (c) write out a clean, machine-parseable LEX file.
+#
+# DESIGN CHOICES
+#   • Input:   Prime field GF(p); DRL basis (not necessarily reduced).
+#   • Output:  LEX basis; we also build an ideal from it (often triangular).
+#   • API:     Sage’s Ideal.transformed_basis('fglm', R_lex) as the canonical
+#              entry point for FGLM conversion (zero-dimensional precondition).
+#   • Robustness: Detailed logging and failure messages for common pitfalls.
+#
+# INPUT FILE (as written by solve_F4_from_file.jl)
+#   # Groebner basis (F4) computed for <path>
+#   # Variables: x0, x1, ..., xn-1
+#   # Field: GF(p)
+#   # Order: degrevlex
+#   # Basis: reduced=UNKNOWN
+#   # Number of input equations: k
+#   # --- Groebner basis ---
+#   <poly_1>
+#   <poly_2>
+#   ...
+#
+# USAGE
+#   sage scripts/convert_to_lex_fglm.sage results/<name>_F4_<timestamp>.txt
+#
+# OUTPUT
+#   results/<stem>_LEX.txt : LEX basis + headers
+#   logs/<stem>_FGLM.log   : verbose run log (parsing, stats, timings)
+#
 ###############################################################################
 
-import sys
-import time
-import os
+import sys, os, time
 
 ############################
-# Utility: log and print at once
+# 0) Utilities: filesystem
 ############################
-def log_and_print(msg, log_handle=None):
+def ensure_dir(path):
+    """Create directory `path` if it does not exist (idempotent)."""
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+def stem_of(path):
+    """Return filename stem without extension, e.g. 'foo/bar/a.txt' → 'a'."""
+    return os.path.splitext(os.path.basename(path))[0]
+
+############################
+# 1) Logger utility
+############################
+def log_and_print(msg, fh=None):
+    """Print to stdout and (optionally) mirror to an open log file handle."""
     print(msg, flush=True)
-    if log_handle is not None:
-        log_handle.write(msg + "\n")
-        log_handle.flush()
+    if fh is not None:
+        fh.write(msg + "\n")
+        fh.flush()
 
 ############################
-# 1. Parse the DRL basis output file
+# 2) Parse the DRL-basis file
 ############################
 def read_groebner_basis_file(result_file):
     """
-    Parse an output file containing a DRL Gröbner basis.
-    Returns:
-        variables: list of variable names (str)
-        p: characteristic of the base field
-        polys: list of basis polynomials as strings
+    Parse the F4 output file and extract:
+      • variables : list[str]
+      • field_p   : int (the characteristic p; prime field)
+      • order     : str (expected 'degrevlex')
+      • polys     : list[str] of basis polynomials (string form)
+
+    We search headers flexibly, then read everything after the
+    '# --- Groebner basis ---' marker as polynomial lines.
     """
-    with open(result_file, 'r') as f:
+    variables, field_p, order = None, None, None
+    basis_start = None
+    polys = []
+
+    with open(result_file, "r") as f:
         lines = f.readlines()
-        variables = None
-        p = None
-        polys = []
-        basis_start = None
-        for i, line in enumerate(lines):
-            if line.startswith("# Variables:"):
-                variables = [v.strip() for v in line.split(":",1)[1].split(",")]
-            elif line.startswith("# Field characteristic:"):
-                p = int(line.split(":")[1].strip())
-            elif line.startswith("# Field: GF("):
-                p = int(line.split("GF(")[1].split(")")[0].strip())
-            elif line.startswith("# --- Groebner basis ---"):
-                basis_start = i + 1
-                break
-        else:
-            raise ValueError("Could not find basis start in file.")
+
+    # Pass 1: headers
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if s.startswith("# Variables:"):
+            # e.g., "# Variables: x0, x1, x2"
+            variables = [v.strip() for v in s.split(":", 1)[1].split(",")]
+        elif s.startswith("# Field:"):
+            # e.g., "# Field: GF(7)" (we accept only this; F4 stage enforces GF(p))
+            try:
+                inside = s.split("GF(", 1)[1].split(")", 1)[0].strip()
+                if "^" in inside:
+                    # F4 stage forbids p^n (we fallback to base p just for logging)
+                    base, _exp = inside.split("^", 1)
+                    field_p = int(base.strip())
+                else:
+                    field_p = int(inside)
+            except Exception:
+                raise ValueError("Could not parse field from header line: '{}'".format(s))
+        elif s.startswith("# Order:"):
+            # e.g., "# Order: degrevlex"
+            order = s.split(":", 1)[1].strip()
+        elif s.startswith("# --- Groebner basis ---"):
+            basis_start = i + 1
+            break
+
+    if variables is None:
+        raise ValueError("Header '# Variables:' not found.")
+    if field_p is None:
+        raise ValueError("Header '# Field: GF(p)' not found.")
+    if order is None:
+        order = "UNKNOWN"  # not fatal, but useful for diagnostics
+    if basis_start is None:
+        raise ValueError("Marker '# --- Groebner basis ---' not found; cannot read basis.")
+
+    # Pass 2: basis polynomials
     for line in lines[basis_start:]:
         s = line.strip()
         if s and not s.startswith("#"):
             polys.append(s)
-    return variables, p, polys
+
+    if not polys:
+        raise ValueError("No polynomials found after the basis marker.")
+
+    return variables, field_p, order, polys
 
 ############################
-# 2. Shape position check
+# 3) Shape-position checks
 ############################
-def is_shape_position(G_lex):
+def shape_heuristic(variables, G_lex):
     """
-    A system is in shape position if its LEX Gröbner basis is in 'triangular' form:
-    each basis element involves only one new variable (i.e., univariate), which allows
-    a "back-substitution" solution (like in triangular linear systems).
-    This is a sufficient condition for efficiently extracting all solutions by root finding.
+    Heuristic 'shape position' test for a LEX Gröbner basis G_lex over vars.
+    Check that leading monomials are *pure powers* and that the sequence of
+    leading variables is nondecreasing in lex order when sorted by lm.
+    Sufficient (not necessary) for triangular form.
     """
     try:
-        return all(len(g.lm().variables()) == 1 for g in G_lex)
+        # Sort by leading term (largest first in lex) to stabilize the scan
+        G_sorted = sorted(G_lex, key=lambda g: g.lm(), reverse=True)
+        lead_vars = []
+        for g in G_sorted:
+            lm = g.lm()
+            if not lm.is_pure_power():
+                return False
+            vs = list(lm.variables())
+            if len(vs) != 1:
+                return False
+            lead_vars.append(str(vs[0]))
+        var_index = {v: i for i, v in enumerate(variables)}
+        idxs = [var_index.get(vn, -1) for vn in lead_vars]
+        if any(i < 0 for i in idxs):
+            return False
+        return all(idxs[i] <= idxs[i+1] for i in range(len(idxs)-1))
     except Exception:
         return False
 
-############################
-# 3. Utility: ensure output directories exist
-############################
-def ensure_dir(path):
-    if not os.path.exists(path):
-        os.makedirs(path)
+def shape_strict(variables, G_lex):
+    """
+    Strict/triangular shape (what back-substitution really uses):
+      G has the form:
+          x0 - f0(x1,...,xn-1),  x1 - f1(x2,...,xn-1), ..., g(xn-1)
+    Equivalent practical checks (in LEX with variables[0] > ... > variables[-1]):
+      • Exactly one polynomial univariate in the last variable v_last;
+      • For each k = n-2..0 there exists a polynomial whose LM is variables[k]^1
+        (hence linear in that variable).
+    """
+    if not G_lex:
+        return False
+    R = G_lex[0].parent()
+    gens = {str(g): g for g in R.gens()}
+    n = len(variables)
+    v_last = variables[-1]
+
+    # (1) exactly one univariate in the last variable
+    univars = [g for g in G_lex if set(map(str, g.variables())) <= {v_last}]
+    if len(univars) != 1:
+        return False
+
+    # (2) for k = n-2 .. 0: LM equals var^1 and degree(var)=1 in that polynomial
+    for k in range(n-2, -1, -1):
+        v = gens[variables[k]]
+        cand = [g for g in G_lex if g.lm() == v]   # LM exactly v^1
+        if len(cand) != 1:
+            return False
+        if cand[0].degree(v) != 1:
+            return False
+    return True
 
 ############################
-# 4. Main conversion and logging logic
+# 4) Main driver
 ############################
 def main():
     if len(sys.argv) != 2:
-        print("Usage: sage scripts/convert_to_lex_fglm.sage path/to/result_file.txt")
+        print("Usage: sage scripts/convert_to_lex_fglm.sage path/to/F4_result.txt")
         sys.exit(1)
+
     result_file = sys.argv[1]
 
-    # === Prepare output filenames in results/logs ===
-    base_name = os.path.splitext(os.path.basename(result_file))[0]
+    # Prepare folders and output names
     results_dir = "results"
-    logs_dir = "logs"
+    logs_dir    = "logs"
     ensure_dir(results_dir)
     ensure_dir(logs_dir)
-    lex_outfile = os.path.join(results_dir, base_name + "_LEX.txt")
-    log_outfile = os.path.join(logs_dir, base_name + "_FGLM.log")
 
-    # Open log file in write mode for full trace
+    base_name   = stem_of(result_file)
+    lex_outfile = os.path.join(results_dir, base_name + "_LEX.txt")
+    log_outfile = os.path.join(logs_dir,    base_name + "_FGLM.log")
+
+    # Open the log file
     with open(log_outfile, "w") as log:
-        log_and_print(f"===== BEGIN FGLM CONVERSION LOG =====", log)
-        log_and_print(f"Input file: {result_file}", log)
+        log_and_print("==============================================================", log)
+        log_and_print(" FGLM CONVERSION — DRL → LEX (Sage/Singular backend)", log)
+        log_and_print("==============================================================", log)
+        log_and_print(f"Input file:  {result_file}", log)
+        log_and_print(f"LEX out:     {lex_outfile}", log)
+        log_and_print("--------------------------------------------------------------", log)
 
         try:
-            # === Parse input basis file (with robust diagnostics) ===
-            log_and_print("Parsing DRL basis output file...", log)
-            variables, p, polys = read_groebner_basis_file(result_file)
-            log_and_print(f"Inferred variables: {variables}", log)
-            log_and_print(f"Field characteristic: {p}", log)
-            log_and_print(f"Number of input polynomials: {len(polys)}", log)
+            # ---- Parse input headers + basis ----
+            log_and_print("Parsing input (headers and DRL basis)...", log)
+            variables, p, in_order, polys_str = read_groebner_basis_file(result_file)
+            log_and_print(f"Variables: {variables}", log)
+            log_and_print(f"Field:     GF({p})", log)
+            log_and_print(f"Order(in): {in_order}", log)
+            log_and_print(f"Basis size (input): {len(polys_str)}", log)
 
-            # === Input DRL basis stats ===
-            input_basis_size = len(polys)
-            input_degrees = []
-            input_max_deg = None
-            try:
-                log_and_print("Computing input degree statistics...", log)
-                R_temp = PolynomialRing(GF(p), variables, order='deglex')
-                input_degrees = [R_temp(s).total_degree() for s in polys]
-                input_max_deg = max(input_degrees)
-                log_and_print(f"Input basis degrees: {input_degrees}", log)
-            except Exception as e:
-                log_and_print(f"Warning: could not compute DRL degree stats: {e}", log)
-
-            log_and_print("Constructing DRL and LEX polynomial rings...", log)
-            R_drl = PolynomialRing(GF(p), variables, order='deglex')
-            G_drl = [R_drl(s) for s in polys]
+            # ---- Build DRL ring/ideal in Sage ----
+            log_and_print("Constructing DRL ring and ideal...", log)
+            R_drl = PolynomialRing(GF(p), variables, order='degrevlex')
+            G_drl = [R_drl(s) for s in polys_str]
             I_drl = R_drl.ideal(G_drl)
 
-            log_and_print("Constructing LEX polynomial ring...", log)
+            # ---- Quick stats on the input basis ----
+            try:
+                degs = [g.total_degree() for g in G_drl]
+                log_and_print(f"Degrees(in): max={max(degs)}, list={degs}", log)
+            except Exception as e:
+                log_and_print(f"Warning: could not compute input degrees: {e}", log)
+
+            # ---- Zero-dimensionality (FGLM precondition) ----
+            log_and_print("Checking zero-dimensionality (Krull dimension == 0)...", log)
+            dim = I_drl.dimension()
+            log_and_print(f"Krull dimension: {dim}", log)
+            if dim != 0:
+                log_and_print("ERROR: Ideal is not zero-dimensional. FGLM requires dim = 0.", log)
+                raise ValueError("Non-zero-dimensional ideal; aborting FGLM.")
+
+            # ---- Build LEX ring ----
+            log_and_print("Constructing LEX ring...", log)
             R_lex = PolynomialRing(GF(p), variables, order='lex')
-            log_and_print("Mapping DRL basis polynomials to LEX ring...", log)
-            G_lex = [R_lex(str(p)) for p in G_drl]
-            I_lex = R_lex.ideal(G_lex)
 
-            log_and_print("Checkpoint: About to call FGLM (Singular stdfglm) for basis conversion...", log)
+            # ---- FGLM conversion ----
+            log_and_print("Running FGLM (Ideal.transformed_basis('fglm', R_lex))...", log)
             t0 = time.time()
-            G_lex_fglm = I_lex.groebner_basis(algorithm="singular:stdfglm")
+            # This computes a GB in the *target* ring/order using the FGLM algorithm.
+            G_lex_fglm = I_drl.transformed_basis('fglm', R_lex)
             t1 = time.time()
-            fglm_time = t1 - t0
-            log_and_print(f"Checkpoint: FGLM finished in {fglm_time:.5f} seconds.", log)
+            log_and_print(f"FGLM wall time: {t1 - t0:.6f} s", log)
 
-            # === Output LEX basis stats ===
-            output_basis_size = len(G_lex_fglm)
-            output_degrees = [g.total_degree() for g in G_lex_fglm]
-            output_max_deg = max(output_degrees)
-            shape_pos = is_shape_position(G_lex_fglm)
+            # ---- Normalization: ensure a reduced LEX basis ----
+            log_and_print("Ensuring LEX basis is reduced (normalization)...", log)
+            I_lex = R_lex.ideal(G_lex_fglm)
+            G_lex = I_lex.groebner_basis()   # reduced GB in LEX (Singular backend)
 
-            log_and_print("\nLEX Groebner basis via FGLM:", log)
-            for g in G_lex_fglm:
-                log_and_print(str(g), log)
+            # ---- Output stats ----
+            out_degs = [g.total_degree() for g in G_lex]
+            log_and_print(f"Basis size(out): {len(G_lex)}", log)
+            log_and_print(f"Degrees(out): max={max(out_degs)}, list={out_degs}", log)
 
+            # ---- Shape position (heuristic + strict) ----
+            shape_h = shape_heuristic(variables, G_lex)
+            shape_s = shape_strict(variables, G_lex)
+            log_and_print(f"Shape position (heuristic): {shape_h}", log)
+            log_and_print(f"Shape position (strict):    {shape_s}", log)
+
+            # ---- Write LEX basis file with stable headers ----
+            log_and_print(f"Writing LEX basis to: {lex_outfile}", log)
             with open(lex_outfile, "w") as out:
-                out.write(f"# Lex Groebner basis for {result_file}\n")
+                out.write(f"# Lex Groebner basis (FGLM) for {result_file}\n")
                 out.write(f"# Variables: {', '.join(variables)}\n")
                 out.write(f"# Field: GF({p})\n")
-                for g in G_lex_fglm:
+                out.write(f"# Order: lex\n")
+                out.write(f"# Basis: reduced=True\n")
+                out.write(f"# Zero-dimensional: True\n")
+                # Write **strict** shape result (this is what your extractor expects)
+                out.write(f"# Shape position: {shape_s}\n")
+                out.write("# --- Groebner basis (LEX) ---\n")
+                for g in G_lex:
                     out.write(str(g) + "\n")
-            log_and_print(f"\nSaved LEX Groebner basis to {lex_outfile}", log)
 
-            # === Save all diagnostic and complexity information ===
-            log_and_print("Saving FGLM statistics...", log)
-            log.write(f"# FGLM conversion log for {result_file}\n")
-            log.write(f"# Input DRL Groebner basis: {input_basis_size} polys, max deg = {input_max_deg}, degrees = {input_degrees}\n")
-            log.write(f"# Output LEX Groebner basis: {output_basis_size} polys, max deg = {output_max_deg}, degrees = {output_degrees}\n")
-            log.write(f"# FGLM wall time: {fglm_time:.5f} seconds\n")
-            log.write(f"# LEX basis shape position: {shape_pos}\n")
-            log.write(f"# Input: {result_file}\n")
-            log.write(f"# Output: {lex_outfile}\n")
-            log_and_print("FGLM stats log saved.", log)
+            # ---- Echo representative lines to log ----
+            log_and_print("LEX basis (first few polynomials):", log)
+            for g in G_lex[:min(5, len(G_lex))]:
+                log_and_print("  " + str(g), log)
+
+            log_and_print("--------------------------------------------------------------", log)
+            log_and_print("FGLM conversion COMPLETE.", log)
 
         except Exception as e:
-            log_and_print(f"ERROR: {str(e)}", log)
+            # Log and re-raise (so your batch system will mark the job as failed)
             import traceback
-            tb_str = traceback.format_exc()
-            log_and_print(tb_str, log)
-            log_and_print("===== FGLM CONVERSION FAILED =====", log)
-            raise
-
-        log_and_print("===== END FGLM CONVERSION LOG =====", log)
+            log_and_print("FGLM conversion FAILED with an exception:", log)
+            log_and_print(str(e), log)
+            log_and_print(traceback.format_exc(), log)
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()

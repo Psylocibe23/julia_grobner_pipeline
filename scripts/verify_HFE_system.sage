@@ -1,0 +1,178 @@
+###############################################################################
+# verify_HFE_system.sage — sanity checks for a generated classical-HFE instance
+#
+# What it does:
+#   • Parses a pipeline “.in” file:
+#       line 1: variable names (e.g., "x0, x1, ..., x{n-1}")
+#       line 2: field characteristic (e.g., "2" or "GF(2)")
+#       next n lines: public equations in GF(2)[x]
+#       next n lines (optional): field equations x_i^2 + x_i
+#   • Optionally reads the planted secret from the generation log
+#       (accepts "Secret: [..]" or "Secret = [..]" formats).
+#   • Verifies: degrees, presence of at least one quadratic, P(x*) = 0,
+#       and the Jacobian rank at x*.
+#
+# Usage:
+#   sage scripts/verify_HFE_system.sage <infile.in> [logfile] [--secret v0,v1,...,v{n-1}]
+#
+# Examples:
+#   sage scripts/verify_HFE_system.sage data/hfe_instances/HFE_n6_D8.in logs/HFE_n6_D8_genlog.txt
+#   sage scripts/verify_HFE_system.sage data/hfe_instances/HFE_n6_D8.in --secret 1,1,1,1,1,1
+###############################################################################
+
+import sys, re, os
+from sage.all import GF, PolynomialRing, matrix
+
+def load_system_from_in(infile):
+    """Read pipeline .in, build R = GF(p)[x], return (R, vars, public_polys, field_polys_or_None)."""
+    with open(infile, "r") as f:
+        lines = [ln.strip() for ln in f.readlines() if ln.strip()]
+
+    if len(lines) < 2:
+        raise ValueError("Input file too short (need at least 2 header lines).")
+
+    # 1) Variables
+    varnames = [v.strip() for v in lines[0].split(",")]
+    n = len(varnames)
+    if n == 0:
+        raise ValueError("No variables found in first line.")
+
+    # 2) Field (accept '2', 'GF(2)', 'GF(2^1)')
+    fld = lines[1]
+    if fld == "2":
+        p = 2
+    elif fld.startswith("GF("):
+        inside = fld.split("GF(",1)[1].split(")",1)[0].strip()
+        if "^" in inside:
+            base, _deg = inside.split("^",1)
+            p = int(base.strip())
+        else:
+            p = int(inside)
+    else:
+        p = int(fld)  # fallback if someone wrote just "2" without GF()
+
+    F = GF(p)
+    R = PolynomialRing(F, varnames, order='lex')
+    x = R.gens()
+
+    # 3) Equations: assume first n are public; next n are field eqs (if present)
+    eq_lines = lines[2:]
+    if len(eq_lines) < n:
+        raise ValueError(f"Expected at least {n} public equations; found {len(eq_lines)}.")
+
+    public_polys = [R(s) for s in eq_lines[:n]]
+
+    field_polys = None
+    if len(eq_lines) >= 2*n:
+        # try to parse field equations and check they match x_i^2 + x_i
+        cand = [R(s) for s in eq_lines[n:2*n]]
+        ok = all(cand[i] == x[i]**2 + x[i] for i in range(n))
+        field_polys = cand if ok else None  # don’t fail; just report later
+
+    return R, x, public_polys, field_polys
+
+def parse_secret_from_log(logfile):
+    """Find secret in log in either 'Secret: [..]' or 'Secret = [..]' (and variants with x*)."""
+    txt = open(logfile, "r").read()
+    m = re.search(r"Secret(?:\s*x\*)?\s*[:=]\s*\[([01,\s]+)\]", txt, flags=re.IGNORECASE)
+    if not m:
+        raise ValueError("Could not find a 'Secret: [...]' or 'Secret = [...]' line in the log.")
+    vals = [int(t) for t in re.split(r"[,\s]+", m.group(1).strip()) if t != ""]
+    return vals
+
+def jacobian_rank_at(polys, R, xvec_bits):
+    """Rank over GF(p) of the Jacobian of 'polys' evaluated at xvec_bits (list/tuple of 0/1)."""
+    F = R.base_ring()
+    x = R.gens()
+    n = len(x)
+    if len(xvec_bits) != n:
+        raise ValueError("Secret length does not match number of variables.")
+    xstar = tuple(F(int(b)) for b in xvec_bits)
+    J = matrix(F, [[p.derivative(xj)(*xstar) for xj in x] for p in polys])
+    return J.rank(), xstar
+
+def main():
+    # ---- Parse CLI ----
+    if len(sys.argv) < 2:
+        print("Usage: sage scripts/verify_HFE_system.sage <infile.in> [logfile] [--secret v0,v1,...,v{n-1}]")
+        sys.exit(1)
+
+    infile = sys.argv[1]
+    logfile = None
+    secret_bits = None
+
+    # Optional args: logfile and/or --secret list
+    args = sys.argv[2:]
+    if args:
+        # If first extra arg is not a flag, treat it as logfile
+        if args[0] and not args[0].startswith("-"):
+            logfile = args[0]
+            args = args[1:]
+        # parse flags
+        i = 0
+        while i < len(args):
+            if args[i] == "--secret" and i+1 < len(args):
+                secret_bits = [int(t) for t in re.split(r"[,\s]+", args[i+1].strip()) if t != ""]
+                i += 2
+            else:
+                print(f"Unrecognized argument: {args[i]}")
+                sys.exit(2)
+
+    # ---- Load system ----
+    R, x, public_polys, field_polys = load_system_from_in(infile)
+    n = len(x)
+    F = R.base_ring()
+
+    print("==============================================================")
+    print(" HFE INSTANCE VERIFICATION")
+    print("==============================================================")
+    print(f"File: {infile}")
+    print(f"Variables (n): {n}")
+    print(f"Field: GF({F.characteristic()})")
+    print("--------------------------------------------------------------")
+
+    # ---- Degree checks ----
+    degs = [p.total_degree() for p in public_polys]
+    print("Public degrees:", degs, f"(max={max(degs) if degs else 'NA'})")
+    if any(d > 2 for d in degs):
+        print("WARNING: some public equations have degree > 2.")
+    if all(d < 2 for d in degs):
+        print("WARNING: no quadratic terms detected (all deg < 2).")
+
+    # ---- Field equations presence ----
+    if field_polys is None:
+        print("Note: could not confirm field equations (x_i^2 + x_i) from the file tail.")
+    else:
+        print("Field equations: present and match x_i^2 + x_i.")
+
+    # ---- Get secret ----
+    if secret_bits is None and logfile is not None:
+        try:
+            secret_bits = parse_secret_from_log(logfile)
+            print(f"Secret (from log): {secret_bits}")
+        except Exception as e:
+            print(f"Could not parse secret from log: {e}")
+
+    if secret_bits is not None:
+        if len(secret_bits) != n:
+            print(f"ERROR: secret length {len(secret_bits)} does not match n={n}.")
+            sys.exit(3)
+
+        # Vanishing check
+        xstar = tuple(F(int(b)) for b in secret_bits)
+        vanish = [p(*xstar) == 0 for p in public_polys]
+        print("Vanishing at secret:", all(vanish))
+        for i, ok in enumerate(vanish, 1):
+            print(f"  Eq {i}: {ok}")
+
+        # Jacobian rank
+        rankJ, _ = jacobian_rank_at(public_polys, R, secret_bits)
+        print(f"Jacobian rank at secret: {rankJ} / {n}")
+    else:
+        print("Secret not provided and no valid log parsed; skipping vanishing/Jacobian checks.")
+
+    print("--------------------------------------------------------------")
+    print("Verification complete.")
+
+if __name__ == "__main__":
+    main()

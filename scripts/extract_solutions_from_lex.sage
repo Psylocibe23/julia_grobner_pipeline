@@ -1,59 +1,423 @@
-# fast_extract_zerosdim_solutions.sage
+###############################################################################
+# extract_solutions_from_lex.sage  —  Solution extraction from a LEX GB
+#
+# PURPOSE
+#   Given a Gröbner basis G in **LEX** order over GF(p) — typically obtained by
+#   the FGLM stage — extract **all solutions** in the base field GF(p).
+#
+# STRATEGY
+#   1) Parse headers and the LEX basis polynomials from the input file.
+#   2) Build R = GF(p)[variables] with 'lex' order and form the ideal I.
+#   3) Try the fast path (triangular / shape position):
+#        • identify a univariate polynomial in the last variable,
+#        • convert it to a true univariate over F by reconstructing coefficients,
+#        • factor over GF(p) to get last-variable roots,
+#        • back-substitute upward, one variable at a time (again using true
+#          univariates for robust root finding).
+#   4) Verify each candidate solution against *all* basis polynomials.
+#   5) Fallback: use I.variety(GF(p)) if the fast path is not applicable.
+#
+# INPUT (from convert_to_lex_fglm.sage)
+#   # Lex Groebner basis (FGLM) for ...
+#   # Variables: x0, x1, ..., xn-1
+#   # Field: GF(p)
+#   # Order: lex
+#   # Basis: reduced=True
+#   # Shape position: True|False
+#   # --- Groebner basis (LEX) ---
+#   <one polynomial per line>
+#
+# USAGE
+#   sage scripts/extract_solutions_from_lex.sage results/<stem>_F4_<ts>_LEX.txt
+#
+# OUTPUT
+#   results/<stem>_LEX_sols.txt    : one solution per line, e.g. {x0: 1, x1: 0}
+#   logs/<stem>_LEX_extract.log    : verbose run log
+#
+###############################################################################
 
-import sys
+import sys, os, time
 
-def parse_basis_file(filename):
-    variables, p, polys = None, None, []
-    with open(filename, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                if line.startswith("# Variables:"):
-                    variables = [v.strip() for v in line.split(":",1)[1].split(",")]
-                elif line.startswith("# Field: GF("):
-                    field_str = line.split("GF(",1)[1].split(")")[0]
-                    if "^" in field_str:
-                        p, n = [int(x.strip()) for x in field_str.split("^")]
-                        p = p**n
-                    else:
-                        p = int(field_str)
-                continue
-            polys.append(line)
-    if variables is None or p is None:
-        raise ValueError("Variables or field not found")
-    return variables, p, polys
+############################
+# 0) Utilities (filesystem, printing)
+############################
+def ensure_dir(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
 
-def reduce_exponents(poly, p):
-    R = poly.parent()
-    new_monomials = {}
-    for mon, coeff in poly.dict().items():
-        new_mon = tuple(e % p for e in mon)
-        if new_mon in new_monomials:
-            new_monomials[new_mon] += coeff
-        else:
-            new_monomials[new_mon] = coeff
-    # Remove zeros
-    new_monomials = {mon: coeff for mon, coeff in new_monomials.items() if coeff != 0}
-    return R(new_monomials)
+def stem_of(path):
+    return os.path.splitext(os.path.basename(path))[0]
 
+def log_and_print(msg, fh=None):
+    print(msg, flush=True)
+    if fh is not None:
+        fh.write(msg + "\n")
+        fh.flush()
+
+############################
+# 1) Parse the LEX-basis file
+############################
+def read_lex_basis_file(lex_file):
+    variables, p, order, shape_hdr = None, None, None, None
+    polys_str = []
+    basis_start = None
+
+    with open(lex_file, "r") as f:
+        lines = f.readlines()
+
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if s.startswith("# Variables:"):
+            variables = [v.strip() for v in s.split(":", 1)[1].split(",")]
+        elif s.startswith("# Field: GF("):
+            inside = s.split("GF(", 1)[1].split(")", 1)[0].strip()
+            if "^" in inside:
+                base, _ = inside.split("^", 1)
+                p = int(base.strip())
+            else:
+                p = int(inside)
+        elif s.startswith("# Order:"):
+            order = s.split(":", 1)[1].strip()
+        elif s.startswith("# Shape position:"):
+            txt = s.split(":", 1)[1].strip()
+            shape_hdr = (txt.lower() == "true")
+        elif s.startswith("# --- Groebner basis"):
+            basis_start = i + 1
+            break
+
+    if variables is None:
+        raise ValueError("Header '# Variables:' not found.")
+    if p is None:
+        raise ValueError("Header '# Field: GF(p)' not found.")
+    if order is None:
+        order = "UNKNOWN"
+    if basis_start is None:
+        raise ValueError("Marker '# --- Groebner basis (LEX) ---' not found.")
+
+    for line in lines[basis_start:]:
+        s = line.strip()
+        if s and not s.startswith("#"):
+            polys_str.append(s)
+    if not polys_str:
+        raise ValueError("No polynomials found after the basis marker.")
+
+    return variables, p, order, polys_str, shape_hdr
+
+############################
+# 2) Shape-position check (sufficient, not necessary)
+############################
+def lex_shape_position(variables, G_lex):
+    try:
+        G_sorted = sorted(G_lex, key=lambda g: g.lm(), reverse=True)
+        lead_vars = []
+        for g in G_sorted:
+            lm = g.lm()
+            vs = list(lm.variables())
+            if len(vs) != 1:
+                return False
+            lead_vars.append(str(vs[0]))
+        var_index = {v: i for i, v in enumerate(variables)}
+        idxs = [var_index.get(vn, -1) for vn in lead_vars]
+        if any(i < 0 for i in idxs):
+            return False
+        return all(idxs[i] <= idxs[i+1] for i in range(len(idxs)-1))
+    except Exception:
+        return False
+
+############################
+# 3) Helpers: robust univariate conversion and root finding
+############################
+def to_true_univariate(poly_mv, var, R, F):
+    """
+    Rebuild a *true* univariate polynomial f(T) ∈ F[T] from a multivariate
+    polynomial `poly_mv` that depends only on the single ring generator `var`.
+    We do this by reading exponent tuples and coefficients, ensuring that all
+    other exponents are zero, and placing coefficients into a dense list.
+    """
+    # Index of `var` in the ring generators
+    gens = R.gens()
+    try:
+        idx = list(gens).index(var)
+    except ValueError:
+        raise TypeError("Requested variable is not a generator of the ring.")
+
+    # Extract exponent tuples and coefficients from Singular-backed poly
+    exps = poly_mv.exponents()       # list of tuples (e_0, ..., e_{n-1})
+    coeffs = poly_mv.coefficients()  # list of coefficients, same order as exps
+    if len(exps) != len(coeffs):
+        raise RuntimeError("Inconsistent monomial/coeff arrays in polynomial.")
+
+    # Verify univariate and capture max degree
+    maxdeg = 0
+    for e in exps:
+        if sum(e[j] for j in range(len(e)) if j != idx) != 0:
+            raise TypeError("Polynomial is not univariate in the requested variable.")
+        if e[idx] > maxdeg:
+            maxdeg = e[idx]
+
+    # Build coefficients of f(T) in ascending degree (dense list)
+    U.<T> = PolynomialRing(F)
+    arr = [F(0)] * (maxdeg + 1)
+    for e, c in zip(exps, coeffs):
+        arr[e[idx]] += F(c)
+
+    return U(arr)  # f(T) = sum arr[d] * T^d
+
+def roots_over_field_univariate(poly_mv, var, R, F):
+    """
+    Given a multivariate polynomial `poly_mv` that is in fact univariate in `var`,
+    return its roots in the base field F by first converting to a true univariate.
+    """
+    f_uni = to_true_univariate(poly_mv, var, R, F)      # f ∈ F[T]
+    # Distinct roots with multiplicities respected (we ignore multiplicities)
+    return [a for (a, mult) in f_uni.roots(multiplicities=True, ring=F)]
+
+############################
+# 4) Fast solver for triangular / shape LEX bases
+############################
+def solve_shape_lex(R, variables, G_lex, F, log=None):
+    """
+    Solve when LEX basis is triangular-like (“shape position”):
+      1) pick a univariate g_last in the last variable x_{n-1} and factor it;
+      2) for each root r, back-substitute upwards, solving one var at a time;
+      3) verify each full assignment against the basis.
+    Returns a list of solutions as dicts {R.gen(i): value_in_F}.
+    """
+    n = len(variables)
+    gens = R.gens()
+    name_to_var = {str(gens[i]): gens[i] for i in range(n)}
+    v_last = name_to_var[variables[-1]]
+
+    # Pick a univariate polynomial in the last variable (if any)
+    univariates = [g for g in G_lex if set(map(str, g.variables())) <= {variables[-1]}]
+    if not univariates:
+        log_and_print("No univariate polynomial in the last variable; shape-solver not applicable.", log)
+        return []
+
+    g_last = max(univariates, key=lambda g: g.degree(v_last))
+    roots_last = roots_over_field_univariate(g_last, v_last, R, F)
+    log_and_print(f"Univariate in {variables[-1]} has {len(roots_last)} root(s) over GF({F.order()}): {roots_last}", log)
+
+    # Map leading variable → a representative polynomial for that variable
+    lead_poly = {}
+    for g in G_lex:
+        lm = g.lm()
+        vs = list(lm.variables())
+        if len(vs) == 1:
+            vn = str(vs[0])
+            lead_poly.setdefault(vn, g)
+
+    solutions = []
+    for r in roots_last:
+        assign = {v_last: r}
+        consistent = True
+
+        # Process variables from x_{n-2} down to x_0
+        for k in range(n-2, -1, -1):
+            vk_name = variables[k]
+            vk = name_to_var[vk_name]
+
+            poly = lead_poly.get(vk_name, None)
+            if poly is None:
+                log_and_print(f"No leading polynomial for {vk_name}; aborting fast path.", log)
+                consistent = False
+                break
+
+            # Substitute higher variables; the result should depend only on vk
+            pk = poly.subs(assign)
+
+            # If constant: must be zero to be consistent
+            if pk.degree(vk) == 0:
+                if pk == 0:
+                    continue
+                consistent = False
+                break
+
+            # Convert to true univariate in vk and solve over F
+            try:
+                fk = to_true_univariate(pk, vk, R, F)  # ∈ F[T]
+            except (TypeError, ValueError):
+                # Not univariate → not classic shape; abort fast path
+                consistent = False
+                break
+
+            if fk.degree() == 1:
+                # fk = a*T + b  ⇒  T = -b/a
+                coeffs = fk.list()          # [b, a] for degree 1
+                b = coeffs[0] if len(coeffs) > 0 else F(0)
+                a = coeffs[1] if len(coeffs) > 1 else F(0)
+                if a == 0:
+                    rs = [a for (a, m) in fk.roots(multiplicities=True, ring=F)]
+                else:
+                    rs = [(-b) / a]
+            else:
+                rs = [a for (a, m) in fk.roots(multiplicities=True, ring=F)]
+
+            if not rs:
+                consistent = False
+                break
+            if len(rs) > 1:
+                # Multi-branching — we could DFS here; keep fast path simple.
+                log_and_print(f"Multiple roots for {vk_name}; deferring to slow path.", log)
+                consistent = False
+                break
+
+            assign[vk] = rs[0]
+
+        if not consistent:
+            continue
+
+        # Verify full assignment against all basis polynomials
+        ok = True
+        for g in G_lex:
+            if g.subs(assign) != 0:
+                ok = False
+                break
+        if ok:
+            solutions.append(assign)
+
+    # Deduplicate solutions (tuple of ints as canonical key)
+    uniq, seen = [], set()
+    for sol in solutions:
+        key = tuple(int(sol[name_to_var[v]]) for v in variables)
+        if key not in seen:
+            seen.add(key)
+            uniq.append(sol)
+    return uniq
+
+############################
+# 5) Pretty-print and file I/O for solutions
+############################
+def pretty_value(a):
+    try:
+        return str(int(a))
+    except Exception:
+        return str(a)
+
+def write_solutions(outfile, variables, solutions, name_to_var):
+    with open(outfile, "w") as out:
+        out.write(f"# Solutions extracted from LEX basis\n")
+        out.write(f"# Variables: {', '.join(variables)}\n")
+        out.write(f"# Count: {len(solutions)}\n")
+        for sol in solutions:
+            parts = []
+            for vname in variables:
+                rv = name_to_var[vname]
+                parts.append(f"{vname}: {pretty_value(sol[rv])}")
+            out.write("{" + ", ".join(parts) + "}\n")
+
+############################
+# 6) Main driver
+############################
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: sage fast_extract_zerosdim_solutions.sage <basis_file>")
+    if len(sys.argv) != 2:
+        print("Usage: sage scripts/extract_solutions_from_lex.sage results/<stem>_LEX.txt")
         sys.exit(1)
-    filename = sys.argv[1]
-    variables, p, polys_str = parse_basis_file(filename)
-    F = GF(p)
-    R = PolynomialRing(F, variables)
-    polys = [reduce_exponents(R(s), p) for s in polys_str if s]
-    I = R.ideal(polys)
-    print(f"Extracting solutions for {filename} using state-of-the-art methods.")
-    sols = I.variety()
-    print(f"Found {len(sols)} solutions.")
-    out_file = filename.replace('.txt', '_sols.txt')
-    with open(out_file, 'w') as out:
-        for sol in sols:
-            out.write("{" + ", ".join(f"{k}: {v}" for k, v in sol.items()) + "}\n")
-    print(f"Solutions saved to {out_file}")
+
+    lex_file = sys.argv[1]
+
+    results_dir = "results"
+    logs_dir    = "logs"
+    ensure_dir(results_dir)
+    ensure_dir(logs_dir)
+
+    base_name = stem_of(lex_file)
+    sols_out  = os.path.join(results_dir, base_name + "_sols.txt")
+    log_out   = os.path.join(logs_dir,    base_name + "_LEX_extract.log")
+
+    with open(log_out, "w") as log:
+        log_and_print("==============================================================", log)
+        log_and_print(" LEX SOLUTION EXTRACTION — GF(p) (Sage)", log)
+        log_and_print("==============================================================", log)
+        log_and_print(f"Input LEX basis: {lex_file}", log)
+        log_and_print(f"Output solutions: {sols_out}", log)
+        log_and_print("--------------------------------------------------------------", log)
+
+        try:
+            # Parse input
+            variables, p, order, polys_str, shape_hdr = read_lex_basis_file(lex_file)
+            log_and_print(f"Variables: {variables}", log)
+            log_and_print(f"Field:     GF({p})", log)
+            log_and_print(f"Order:     {order}", log)
+            log_and_print(f"Basis size: {len(polys_str)}", log)
+            if shape_hdr is not None:
+                log_and_print(f"Header says shape position: {shape_hdr}", log)
+
+            # Build LEX ring/ideal
+            F = GF(p)
+            R = PolynomialRing(F, variables, order='lex')
+            G_lex = [R(s) for s in polys_str]
+            I_lex = R.ideal(G_lex)
+            gens = R.gens()
+            name_to_var = {str(gens[i]): gens[i] for i in range(len(gens))}
+
+            # Sanity: zero-dimensionality
+            dim = I_lex.dimension()
+            log_and_print(f"Krull dimension: {dim}", log)
+            if dim != 0:
+                log_and_print("WARNING: Ideal is not zero-dimensional; extraction may be incomplete.", log)
+
+            # Fast path
+            in_shape = lex_shape_position(variables, G_lex)
+            log_and_print(f"Shape position (heuristic): {in_shape}", log)
+            solutions = []
+            if in_shape:
+                log_and_print("Attempting triangular back-substitution...", log)
+                t0 = time.time()
+                solutions = solve_shape_lex(R, variables, G_lex, F, log=log)
+                t1 = time.time()
+                log_and_print(f"Triangular solver produced {len(solutions)} solution(s) in {t1 - t0:.6f} s.", log)
+
+            # Fallback: full enumeration
+            if not solutions:
+                log_and_print("Falling back to I_lex.variety(GF(p)) enumeration...", log)
+                t1 = time.time()
+                sols_dicts = I_lex.variety(F)
+                t2 = time.time()
+                log_and_print(f"variety(GF({p})) returned {len(sols_dicts)} solution(s) in {t2 - t1:.6f} s.", log)
+                solutions = []
+                for d in sols_dicts:
+                    sol = {}
+                    for vname in variables:
+                        rv = name_to_var[vname]
+                        sol[rv] = d[rv]
+                    solutions.append(sol)
+
+            # Final verification
+            log_and_print("Verifying all solutions against the LEX basis...", log)
+            verified = []
+            for sol in solutions:
+                if all(g.subs(sol) == 0 for g in G_lex):
+                    verified.append(sol)
+            if len(verified) != len(solutions):
+                log_and_print(f"Discarded {len(solutions) - len(verified)} non-solutions after verification.", log)
+            solutions = verified
+
+            # Deduplicate and write
+            uniq, seen = [], set()
+            for sol in solutions:
+                key = tuple(int(sol[name_to_var[v]]) for v in variables)
+                if key not in seen:
+                    seen.add(key)
+                    uniq.append(sol)
+            solutions = uniq
+
+            write_solutions(sols_out, variables, solutions, name_to_var)
+            log_and_print(f"Wrote {len(solutions)} solution(s) to {sols_out}", log)
+
+            for i, sol in enumerate(solutions[:min(5, len(solutions))]):
+                pretty = ", ".join(f"{v}: {pretty_value(sol[name_to_var[v]])}" for v in variables)
+                log_and_print(f"Solution #{i+1}: {{{pretty}}}", log)
+
+            log_and_print("--------------------------------------------------------------", log)
+            log_and_print("LEX solution extraction COMPLETE.", log)
+
+        except Exception as e:
+            import traceback
+            log_and_print("Extraction FAILED with an exception:", log)
+            log_and_print(str(e), log)
+            log_and_print(traceback.format_exc(), log)
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
