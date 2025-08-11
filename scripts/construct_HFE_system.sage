@@ -77,14 +77,14 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
     for i in range(n):
         e_i = 1 << i
         if e_i > D: break
-        for j in range(i+1, n):        # STRICT i<j
+        for j in range(i+1, n):  # STRICT i<j
             e_ij = e_i + (1 << j)
             if e_ij > D: break
             quad_pairs.append((i, j))
 
     have_quad = False; have_lin = False
 
-    # pick quadratic terms
+    # quadratic terms
     for (i, j) in quad_pairs:
         if random() < prob_quad:
             c = K.random_element()
@@ -92,7 +92,7 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
                 F += c * X**((1 << i) + (1 << j))
                 have_quad = True
 
-    # pick linearized terms
+    # linearized terms
     for i in lin_is:
         if random() < prob_lin:
             c = K.random_element()
@@ -100,7 +100,7 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
                 F += c * X**(1 << i)
                 have_lin = True
 
-    # optional constant
+    # constant
     c0 = K.random_element()
     if c0 != 0:
         F += c0
@@ -117,12 +117,12 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
 
     return F, have_quad, have_lin
 
-# ---------- Project K[ x ] → n coordinates in F2[ x ] ------------------------
+# ---------- Project K[x] → n coordinates in F2[x] ------------------------
 
 def coords_over_F2(poly_Kx, K, a, n, R_F2):
     """
-    Given poly_Kx ∈ K[ x0,...,x{n-1} ], write coefficients in the power basis
-    {1,a,...,a^{n-1}} and return [g_0,...,g_{n-1}] with g_t ∈ F2[ x ].
+    Given poly_Kx ∈ K[x0,...,x{n-1}], write coefficients in the power basis
+    {1,a,...,a^{n-1}} and return [g_0,...,g_{n-1}] with g_t ∈ F2[x]
     """
     coords = [R_F2(0) for _ in range(n)]
     for mon, coeff in poly_Kx.dict().items():
@@ -137,8 +137,8 @@ def coords_over_F2(poly_Kx, K, a, n, R_F2):
 def boolean_reduce(poly, R):
     """
     Correct Boolean reduction modulo <x_i^2 - x_i>:
-      for each variable, any exponent e >= 1 collapses to 1 (NOT e mod 2).
-    This keeps x^k = x for k>=1 and preserves quadratic products.
+    for each variable, any exponent e >= 1 collapses to 1.
+    This keeps x^k = x for k>=1 and preserves quadratic products
     """
     terms = {}
     for mon, coeff in poly.dict().items():
@@ -152,7 +152,7 @@ def boolean_reduce(poly, R):
 
 def jacobian_rank_at(polys, R, x_star):
     """
-    Rank over GF(2) of J = (∂p_i/∂x_j)(x_star), where polys ⊂ R and x_star ∈ (GF(2))^n.
+    Rank over GF(2) of J = (∂p_i/∂x_j)(x_star), where polys in R and x_star in (GF(2))^n
     """
     n = len(polys); F2 = R.base_ring(); xs = R.gens()
     J = Matrix(F2, n, n, 0)
@@ -167,8 +167,7 @@ def jacobian_rank_at(polys, R, x_star):
 
 def write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, secret_vec):
     """
-    Emit a parse-friendly secret log with the exact objects needed for downstream
-    verification and equivalence checks.
+    Emit a parse-friendly secret log with secret polynomial and affine maps
     """
     ensure_dir_for(secret_logfile)
     with open(secret_logfile, "w") as S:
@@ -201,13 +200,13 @@ def build_and_export_instance(n, D, out_infile, seed=None,
     Conditions:
      (i) F has linearized and TRUE quadratic HFE terms (when admissible).
     (ii) public system has degree ≥ 2 after Boolean reduction.
-   (iii) ∃ x* with Jacobian rank ≥ rank_min (default n-1). If not found but
+   (iii) there exists x* with Jacobian rank ≥ rank_min (default n-1). If not found but
          allow_fallback=True, accept the best-rank seen.
 
     Writes:
       - .in file for the pipeline
       - generation log (logfile)
-      - NEW: secret log (secret_logfile) with F, S, T, secret
+      - secret log (secret_logfile) with F, S, T, secret
     """
     # ---- logging files ----
     L = None
@@ -230,15 +229,15 @@ def build_and_export_instance(n, D, out_infile, seed=None,
 
         # Base structures
         F2 = GF(2)
-        K.<a> = GF(2**n)                 # field for HFE
+        K.<a> = GF(2**n)  # field for HFE
         modulus = K.modulus()
         names = tuple(f"x{i}" for i in range(n))
-        R = PolynomialRing(F2, n, names=names)     # R = F2[x]
-        XK = PolynomialRing(K, n, names=names)     # XK = K[x]
+        R = PolynomialRing(F2, n, names=names)  # R = F2[x]
+        XK = PolynomialRing(K, n, names=names)  # XK = K[x]
         x_R  = R.gens()
         x_K  = XK.gens()
 
-        # Draw F(X) ∈ K[X]
+        # Draw F(X) in K[X]
         F_univar, have_quad, have_lin = random_hfe_polynomial(
             K, n, D, prob_quad=prob_quad, prob_lin=prob_lin,
             must_have_quad=True, must_have_lin=True
@@ -260,7 +259,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             b_S = vector(F2, [F2.random_element() for _ in range(n)])
             A_T = rnd_inv(n, F2)
 
-            # --- Compute S(x) in K[x] cleanly ---
+            # --- Compute S(x) in K[x] ---
             s_vec_K = []
             for k in range(n):
                 expr = XK(0)
@@ -341,7 +340,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                     log_write(L, f"Public degs: {degs}")
                     log_write(L, f"Secret: {list(x_star)}")
 
-                    # Secret log (always)
+                    # Secret log 
                     if secret_logfile is None:
                         secret_logfile = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
                     write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, x_star)
@@ -356,7 +355,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                         "secret_logfile": secret_logfile
                     }
 
-        # If we reached here, no success. Try fallback?
+        # If you reached here, no success. Try fallback
         if allow_fallback and best["rank"] >= 0 and best["bundle"] is not None:
             A_S, b_S, A_T, z0_R, x_star, degs = best["bundle"]
             s_star  = A_S * x_star + b_S
@@ -402,7 +401,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
         if L is not None:
             L.close()
 
-# ---------- CLI ----------------------------------------------------------------
+# ---------- MAIN ----------------------------------------------------------------
 
 def main():
     if len(sys.argv) < 3:
@@ -425,16 +424,16 @@ def main():
     else:
         out_infile = auto_out; arg_offset = 3
 
-    seed             = int(sys.argv[arg_offset])     if len(sys.argv) >= arg_offset+1 else None
-    prob_quad        = float(sys.argv[arg_offset+1]) if len(sys.argv) >= arg_offset+2 else 0.70
-    prob_lin         = float(sys.argv[arg_offset+2]) if len(sys.argv) >= arg_offset+3 else 0.60
-    rank_min_arg     = sys.argv[arg_offset+3]        if len(sys.argv) >= arg_offset+4 else None
-    rank_min         = int(rank_min_arg) if rank_min_arg is not None else None
-    allow_fallback   = (sys.argv[arg_offset+4].lower() in ("1","true","yes")) if len(sys.argv) >= arg_offset+5 else False
-    max_maps         = int(sys.argv[arg_offset+5])   if len(sys.argv) >= arg_offset+6 else 20
+    seed = int(sys.argv[arg_offset]) if len(sys.argv) >= arg_offset+1 else None
+    prob_quad = float(sys.argv[arg_offset+1]) if len(sys.argv) >= arg_offset+2 else 0.70
+    prob_lin = float(sys.argv[arg_offset+2]) if len(sys.argv) >= arg_offset+3 else 0.60
+    rank_min_arg = sys.argv[arg_offset+3] if len(sys.argv) >= arg_offset+4 else None
+    rank_min = int(rank_min_arg) if rank_min_arg is not None else None
+    allow_fallback = (sys.argv[arg_offset+4].lower() in ("1","true","yes")) if len(sys.argv) >= arg_offset+5 else False
+    max_maps = int(sys.argv[arg_offset+5]) if len(sys.argv) >= arg_offset+6 else 20
     max_secret_tries = int(sys.argv[arg_offset+6])   if len(sys.argv) >= arg_offset+7 else 2048
 
-    logname    = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
+    logname = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
     secretlog  = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
 
     print(f"[{now_str()}] Generating classical HFE instance (n={n}, D={D}) ...")
