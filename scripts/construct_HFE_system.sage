@@ -1,7 +1,7 @@
 ###############################################################################
 # construct_HFE_system.sage  —  Classical HFE instance generator for GF(2)
 #
-# OUTPUT FORMAT (pipeline .in, no comments):
+# OUTPUT (pipeline .in, no comments):
 #   line 1: x0, x1, ..., x{n-1}
 #   line 2: 2
 #   next n lines: public equations over GF(2)
@@ -10,6 +10,25 @@
 # CLASSICAL HFE (char 2):
 #   F(X) uses only exponents 2^i  (linearized) and 2^i+2^j with i<j (true HFE quad),
 #   subject to 2^i ≤ D and 2^i + 2^j ≤ D.
+#
+# LOGS:
+#   • Regular generation log (progress + summary)
+#       logs/HFE_n{n}_D{D}_genlog.txt
+#     includes the secret vector as well.
+#
+#   • NEW: Secret log (parse-friendly details for verification)
+#       logs/HFE_n{n}_D{D}_secret.txt
+#     contains:
+#       Field: GF(2^n)
+#       Modulus polynomial: <irreducible poly over GF(2)>
+#       F(X) = <polynomial over GF(2^n)[X]>
+#       A_S =            # matrix block (one row per line)
+#       [ ... ]
+#       b_S = ( ... )
+#       A_T =
+#       [ ... ]
+#       b_T = ( ... )
+#       Secret = [ ... ]
 ###############################################################################
 
 import sys, os, time
@@ -19,14 +38,17 @@ from sage.all import *
 # ---------- Utilities ---------------------------------------------------------
 
 def ensure_dir_for(path):
+    """Create parent directory for `path`, if needed."""
     d = os.path.dirname(path)
     if d and not os.path.exists(d):
         os.makedirs(d)
 
 def now_str():
+    """Wall-clock time string for user-facing messages."""
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
 def log_write(L, s):
+    """Write a line to an open log file (if any)."""
     if L is not None:
         L.write(s + "\n"); L.flush()
 
@@ -38,6 +60,7 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
     Build F(X) ∈ K[X] with HFE-degree ≤ D using:
       • linearized terms: X^(2^i) when 2^i ≤ D;
       • TRUE quadratic terms: X^(2^i+2^j) with i<j and 2^i+2^j ≤ D.
+    (We exclude i=j because X^(2^i+2^i) = X^(2^{i+1}) in char 2 → linearized.)
     """
     R.<X> = PolynomialRing(K)
     F = R(0)
@@ -121,11 +144,9 @@ def boolean_reduce(poly, R):
     for mon, coeff in poly.dict().items():
         if coeff == 0:
             continue
-        # For each variable exponent e: map e -> 1 if e>0 else 0
         red_mon = tuple(1 if e > 0 else 0 for e in mon)
         terms[red_mon] = terms.get(red_mon, R.base_ring()(0)) + coeff
     return R(terms)
-
 
 # ---------- Jacobian rank -----------------------------------------------------
 
@@ -142,21 +163,53 @@ def jacobian_rank_at(polys, R, x_star):
             J[i, j] = F2(dpoly.subs(subst))
     return J.rank()
 
+# ---------- Secret log writer -------------------------------------------------
+
+def write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, secret_vec):
+    """
+    Emit a parse-friendly secret log with the exact objects needed for downstream
+    verification and equivalence checks.
+    """
+    ensure_dir_for(secret_logfile)
+    with open(secret_logfile, "w") as S:
+        S.write(f"Secret log — {now_str()}\n")
+        S.write(f"Field: GF(2^{n})\n")
+        S.write(f"Modulus polynomial: {K.modulus()}\n")
+        S.write(f"F(X) = {F_univar}\n")
+        # A_S
+        S.write("A_S =\n")
+        for i in range(A_S.nrows()):
+            S.write("[" + " ".join(str(int(A_S[i,j])) for j in range(A_S.ncols())) + "]\n")
+        S.write("b_S = (" + ", ".join(str(int(b)) for b in b_S) + ")\n")
+        # A_T
+        S.write("A_T =\n")
+        for i in range(A_T.nrows()):
+            S.write("[" + " ".join(str(int(A_T[i,j])) for j in range(A_T.ncols())) + "]\n")
+        S.write("b_T = (" + ", ".join(str(int(b)) for b in b_T) + ")\n")
+        # Secret
+        S.write("Secret = [" + ", ".join(str(int(b)) for b in secret_vec) + "]\n")
+
 # ---------- Builder: compute in K[x], then project to F2[x] -------------------
 
 def build_and_export_instance(n, D, out_infile, seed=None,
                               prob_quad=0.70, prob_lin=0.60,
                               max_maps=20, max_secret_tries=2048,
                               rank_min=None, allow_fallback=False,
-                              logfile=None, verbose=False):
+                              logfile=None, secret_logfile=None,
+                              verbose=False):
     """
     Conditions:
      (i) F has linearized and TRUE quadratic HFE terms (when admissible).
     (ii) public system has degree ≥ 2 after Boolean reduction.
    (iii) ∃ x* with Jacobian rank ≥ rank_min (default n-1). If not found but
          allow_fallback=True, accept the best-rank seen.
+
+    Writes:
+      - .in file for the pipeline
+      - generation log (logfile)
+      - NEW: secret log (secret_logfile) with F, S, T, secret
     """
-    # ---- logging file ----
+    # ---- logging files ----
     L = None
     if logfile:
         ensure_dir_for(logfile)
@@ -186,7 +239,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
         x_K  = XK.gens()
 
         # Draw F(X) ∈ K[X]
-        F, have_quad, have_lin = random_hfe_polynomial(
+        F_univar, have_quad, have_lin = random_hfe_polynomial(
             K, n, D, prob_quad=prob_quad, prob_lin=prob_lin,
             must_have_quad=True, must_have_lin=True
         )
@@ -208,7 +261,6 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             A_T = rnd_inv(n, F2)
 
             # --- Compute S(x) in K[x] cleanly ---
-            # s_k(x) = sum_j A_S[k,j]*x_j + b_S[k]  (A_S,b_S ∈ F2 ⊂ K)
             s_vec_K = []
             for k in range(n):
                 expr = XK(0)
@@ -223,7 +275,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             sK = sum(s_vec_K[k] * (a**k) for k in range(n))
 
             # Evaluate the HFE univariate: yK(x) = F( sK(x) ) ∈ K[x]
-            yK = F(sK)
+            yK = F_univar(sK)
 
             # Project K[x] → n polynomials over F2[x]
             y_vec_R = coords_over_F2(yK, K, a, n, R)
@@ -261,7 +313,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                     # Choose b_T so P(x*)=0 (compute at field level)
                     s_star  = A_S * x_star + b_S
                     sK_star = sum(int(s_star[i]) * (a**i) for i in range(n))
-                    yK_star = F(sK_star)
+                    yK_star = F_univar(sK_star)
                     yvec_star = vector(F2, K(yK_star)._vector_())
                     b_T = A_T * yvec_star
 
@@ -274,36 +326,42 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                         # extremely unlikely; continue search
                         continue
 
-                    # SUCCESS
-                    info = {
-                        "ok_zero": True, "rankJ": rankJ, "rank_min": rank_min,
-                        "A_S": A_S, "b_S": b_S, "A_T": A_T, "b_T": b_T,
-                        "F": F, "modulus": modulus, "secret": x_star,
-                        "public_polys": z_fin, "R": R,
-                        "have_quad_in_F": have_quad, "have_lin_in_F": have_lin,
-                        "public_degrees": degs, "map_attempts": amap,
-                    }
-                    log_write(L, f"[map {amap}] success at secret #{t} with rank {rankJ}")
-                    # Write output and log, then return
+                    # SUCCESS: write .in, logs, and secret log
                     ensure_dir_for(out_infile)
                     with open(out_infile, "w") as f:
                         f.write(", ".join(str(v) for v in x_R) + "\n")
                         f.write("2\n")
-                        for p in info["public_polys"]: f.write(str(p) + "\n")
-                        for v in x_R: f.write(f"{v}^2 + {v}\n")
+                        for p in z_fin: f.write(str(p) + "\n")
+                        for v in x_R:   f.write(f"{v}^2 + {v}\n")
 
+                    # Regular log summary
+                    log_write(L, f"[map {amap}] success at secret #{t} with rank {rankJ}")
                     log_write(L, f"OUTPUT: {out_infile}")
                     log_write(L, f"Field modulus: {modulus}")
                     log_write(L, f"Public degs: {degs}")
                     log_write(L, f"Secret: {list(x_star)}")
-                    return info
+
+                    # Secret log (always)
+                    if secret_logfile is None:
+                        secret_logfile = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
+                    write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, x_star)
+
+                    return {
+                        "ok_zero": True, "rankJ": rankJ, "rank_min": rank_min,
+                        "A_S": A_S, "b_S": b_S, "A_T": A_T, "b_T": b_T,
+                        "F": F_univar, "modulus": modulus, "secret": x_star,
+                        "public_polys": z_fin, "R": R,
+                        "have_quad_in_F": have_quad, "have_lin_in_F": have_lin,
+                        "public_degrees": degs, "map_attempts": amap,
+                        "secret_logfile": secret_logfile
+                    }
 
         # If we reached here, no success. Try fallback?
         if allow_fallback and best["rank"] >= 0 and best["bundle"] is not None:
             A_S, b_S, A_T, z0_R, x_star, degs = best["bundle"]
             s_star  = A_S * x_star + b_S
             sK_star = sum(int(s_star[i]) * (a**i) for i in range(n))
-            yK_star = F(sK_star)
+            yK_star = F_univar(sK_star)
             yvec_star = vector(F2, K(yK_star)._vector_())
             b_T = A_T * yvec_star
             z_fin = [p + R(int(b_T[i])) for i, p in enumerate(z0_R)]
@@ -311,24 +369,33 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             subst_eval = {R.gens()[i]: F2(int(x_star[i])) for i in range(n)}
             ok_zero = all(p.subs(subst_eval) == 0 for p in z_fin)
 
-            info = {
-                "ok_zero": ok_zero, "rankJ": best["rank"], "rank_min": rank_min,
-                "A_S": A_S, "b_S": b_S, "A_T": A_T, "b_T": b_T,
-                "F": F, "modulus": modulus, "secret": x_star,
-                "public_polys": z_fin, "R": R,
-                "have_quad_in_F": have_quad, "have_lin_in_F": have_lin,
-                "public_degrees": degs, "map_attempts": max_maps,
-            }
             ensure_dir_for(out_infile)
             with open(out_infile, "w") as f:
                 f.write(", ".join(str(v) for v in R.gens()) + "\n")
                 f.write("2\n")
-                for p in info["public_polys"]: f.write(str(p) + "\n")
+                for p in z_fin: f.write(str(p) + "\n")
                 for v in R.gens(): f.write(f"{v}^2 + {v}\n")
-            log_write(L, f"FALLBACK OUTPUT: {out_infile} (rank={best['rank']} < {rank_min})")
-            return info
 
-        # Hard failure
+            log_write(L, f"FALLBACK OUTPUT: {out_infile} (rank={best['rank']} < {rank_min})")
+            log_write(L, f"Field modulus: {modulus}")
+            log_write(L, f"Public degs: {degs}")
+            log_write(L, f"Secret: {list(x_star)}")
+
+            if secret_logfile is None:
+                secret_logfile = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
+            write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, x_star)
+
+            return {
+                "ok_zero": ok_zero, "rankJ": best["rank"], "rank_min": rank_min,
+                "A_S": A_S, "b_S": b_S, "A_T": A_T, "b_T": b_T,
+                "F": F_univar, "modulus": modulus, "secret": x_star,
+                "public_polys": z_fin, "R": R,
+                "have_quad_in_F": have_quad, "have_lin_in_F": have_lin,
+                "public_degrees": degs, "map_attempts": max_maps,
+                "secret_logfile": secret_logfile
+            }
+
+        # Hard failure (no fallback or no candidate at all)
         raise RuntimeError(f"Failed: best Jacobian rank seen: {best['rank']}.")
 
     finally:
@@ -367,7 +434,8 @@ def main():
     max_maps         = int(sys.argv[arg_offset+5])   if len(sys.argv) >= arg_offset+6 else 20
     max_secret_tries = int(sys.argv[arg_offset+6])   if len(sys.argv) >= arg_offset+7 else 2048
 
-    logname = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
+    logname    = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
+    secretlog  = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
 
     print(f"[{now_str()}] Generating classical HFE instance (n={n}, D={D}) ...")
     print(f"[{now_str()}] Output .in: {out_infile}")
@@ -376,9 +444,10 @@ def main():
         prob_quad=prob_quad, prob_lin=prob_lin,
         max_maps=max_maps, max_secret_tries=max_secret_tries,
         rank_min=rank_min, allow_fallback=allow_fallback,
-        logfile=logname, verbose=False
+        logfile=logname, secret_logfile=secretlog, verbose=False
     )
-    print(f"[{now_str()}] Log written to:  {logname}")
+    print(f"[{now_str()}] Log written to:        {logname}")
+    print(f"[{now_str()}] Secret log written to: {info.get('secret_logfile', secretlog)}")
     print(f"[{now_str()}] P(x*)=0: {info['ok_zero']}, rank(J_P(x*))={info['rankJ']}")
 
 if __name__ == "__main__":
