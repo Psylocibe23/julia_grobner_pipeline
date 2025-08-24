@@ -5,7 +5,7 @@
 #SBATCH --partition=turing-long
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32          # the script will auto-limit workers as needed
-#SBATCH --mem=128G
+#SBATCH --mem=64G
 #SBATCH --time=08:00:00
 
 set -euo pipefail
