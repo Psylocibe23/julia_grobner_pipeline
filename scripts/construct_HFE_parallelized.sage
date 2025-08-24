@@ -4,11 +4,16 @@
 # - True HFE: F(X) uses only exponents 2^i and 2^i+2^j (i<j), ≤ D
 # - Outputs pipeline .in, a human log, and a secret log (F,S,T,secret)
 # - Speedups:
+#     • Build public system directly in F2[x] via Frobenius (no K[x] blow-up)
 #     • Precompute ∂p_i/∂x_j once per (S,T)
-#     • Parallel secret probing (auto-tuned worker count)
+#     • Parallel secret probing (auto-tuned worker count) with early cancel
 # - Safety:
 #     • Skips if output already exists unless forced
 #     • Cancels outstanding workers immediately on success
+#
+# Optional dev check:
+#   Set HFE_SANITY=1 in env to cross-check fast path vs slow path on random
+#   evaluation points (costly; use sparingly just to reassure yourself).
 ###############################################################################
 
 import sys, os, time, multiprocessing
@@ -82,14 +87,13 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
     """
     F(X) ∈ K[X], HFE-degree ≤ D.
       • linearized: X^(2^i) with 2^i ≤ D
-      • true quad : X^(2^i+2^j), i<j, ≤ D  (i=j would collapse to linearized in char 2)
+      • true quad : X^(2^i+2^j), i<j, ≤ D  (i=j collapses to linearized in char 2)
     """
     R.<X> = PolynomialRing(K)
     F = R(0)
 
     # admissible 2^i
-    lin_is = []
-    e = 1; i = 0
+    lin_is, e, i = [], 1, 0
     while i < n and e <= D:
         lin_is.append(i)
         i += 1; e <<= 1
@@ -139,13 +143,126 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
 
     return F, have_quad, have_lin
 
-# ================= Project K[x] → n coordinates in F2[x] =====================
+# =================== Frobenius-aware fast public builder =====================
+
+def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
+    """
+    Build y(x) ∈ K^n with components in F2[x] directly, using Frobenius:
+      s(x) = c0 + sum_v c_v x_v,  c_• ∈ K determined by A_S,b_S and basis {a^k}
+      For term X^{2^i}:      s^{2^i} = c0^{2^i} + sum_v (c_v^{2^i}) x_v
+      For term X^{2^i+2^j}:  expand s^{2^i} * s^{2^j} into const/linear/quad in x.
+    Split each K-coefficient onto the power basis to fill the n coordinates.
+
+    Returns list y[0..n-1] ⊂ F2[x].
+    """
+    F2 = R.base_ring()
+    x = R.gens()
+
+    # s(x) coefficients in K via the fixed basis {a^k}
+    c = [K(0)]*(n+1)  # c[0]=constant, c[v+1] for x_v
+    for k in range(n):
+        ak = a**k
+        if int(b_S[k]) != 0:
+            c[0] += ak
+        for v in range(n):
+            if int(A_S[k,v]) != 0:
+                c[v+1] += ak
+
+    # Determine max Frobenius power 2^t ≤ D
+    max_t = 0; e = 1
+    while (e << 1) <= D:
+        e <<= 1; max_t += 1
+
+    # Precompute c_i^{2^t}
+    c_pow = [[K(0)]*(n+1) for _ in range(max_t+1)]
+    for i in range(n+1):
+        val = c[i]
+        c_pow[0][i] = val
+        for t in range(1, max_t+1):
+            val = val**2
+            c_pow[t][i] = val
+
+    # Accumulators for y ∈ K^n but stored as F2[x] polys via basis splitting
+    y = [R(0) for _ in range(n)]
+    zero_mon = tuple(0 for _ in range(n))
+
+    def add_Kcoef_mon(Kcoef, mon_tuple):
+        if Kcoef == 0:
+            return
+        vec = Kcoef._vector_()  # K→F2^n on the fixed basis
+        mono = R({mon_tuple: 1})
+        for t in range(n):
+            if int(vec[t]) != 0:
+                y[t] += mono
+
+    # Traverse terms of F(X); in a univariate ring Sage uses int exponents
+    for exp, Kcoef in F_univar.dict().items():
+        eX = int(exp)
+
+        if eX == 0:
+            # constant term
+            add_Kcoef_mon(Kcoef, zero_mon)
+            continue
+
+        # linearized 2^i?
+        if (eX & (eX - 1)) == 0:  # power of two
+            i = eX.bit_length() - 1
+            c0i = c_pow[i][0]
+            if c0i != 0:
+                add_Kcoef_mon(Kcoef * c0i, zero_mon)
+            for v in range(n):
+                Cv = c_pow[i][v+1]
+                if Cv != 0:
+                    mon = tuple(1 if j==v else 0 for j in range(n))
+                    add_Kcoef_mon(Kcoef * Cv, mon)
+            continue
+
+        # quadratic 2^i+2^j (i<j)
+        bits = []
+        tmp = eX; pos = 0
+        while tmp:
+            if (tmp & 1) != 0:
+                bits.append(pos)
+            tmp >>= 1; pos += 1
+        if len(bits) != 2:
+            # HFE shouldn't introduce other exponents; skip if present
+            continue
+        i, j = bits[0], bits[1]
+        c0i, c0j = c_pow[i][0], c_pow[j][0]
+
+        # const*const
+        if c0i != 0 and c0j != 0:
+            add_Kcoef_mon(Kcoef * c0i * c0j, zero_mon)
+
+        # const*var and var*const
+        for v in range(n):
+            Ci_v = c_pow[i][v+1]
+            Cj_v = c_pow[j][v+1]
+            if c0i != 0 and Cj_v != 0:
+                mon = tuple(1 if t==v else 0 for t in range(n))
+                add_Kcoef_mon(Kcoef * c0i * Cj_v, mon)
+            if c0j != 0 and Ci_v != 0:
+                mon = tuple(1 if t==v else 0 for t in range(n))
+                add_Kcoef_mon(Kcoef * c0j * Ci_v, mon)
+
+        # var*var
+        for v in range(n):
+            Ci_v = c_pow[i][v+1]
+            if Ci_v == 0: continue
+            for u in range(n):
+                Cj_u = c_pow[j][u+1]
+                if Cj_u == 0: continue
+                if v == u:
+                    mon = tuple(1 if t==v else 0 for t in range(n))
+                else:
+                    mon = tuple(1 if (t==v or t==u) else 0 for t in range(n))
+                add_Kcoef_mon(Kcoef * Ci_v * Cj_u, mon)
+
+    return y
+
+# ================= Project K[x] → n coordinates in F2[x] (slow; for sanity) ==
 
 def coords_over_F2(poly_Kx, K, a, n, R_F2):
-    """
-    Expand coefficients on the power basis {1, a, ..., a^{n-1}} and return
-    the coordinate list [g_0,...,g_{n-1}] with g_t ∈ F2[x].
-    """
     coords = [R_F2(0) for _ in range(n)]
     for mon, coeff in poly_Kx.dict().items():
         cvec = K(coeff)._vector_()
@@ -156,10 +273,6 @@ def coords_over_F2(poly_Kx, K, a, n, R_F2):
     return coords
 
 def boolean_reduce(poly, R):
-    """
-    Boolean reduction modulo <x_i^2 - x_i>: any exponent ≥1 collapses to 1.
-    Preserves quadratic products; x^k = x for k≥1.
-    """
     terms = {}
     for mon, coeff in poly.dict().items():
         if coeff == 0:
@@ -268,7 +381,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
         modulus = K.modulus()
         names = tuple(f"x{i}" for i in range(n))
         R = PolynomialRing(F2, n, names=names)
-        XK = PolynomialRing(K, n, names=names)
+        XK = PolynomialRing(K, n, names=names)  # used only if HFE_SANITY=1
         x_R  = R.gens()
         x_K  = XK.gens()
 
@@ -295,35 +408,21 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             b_S = vector(F2, [F2.random_element() for _ in range(n)])
             A_T = rnd_inv(n, F2)
 
-            # S(x) in K[x]
-            s_vec_K = []
-            for k in range(n):
-                expr = XK(0)
-                for j in range(n):
-                    if int(A_S[k, j]) != 0:
-                        expr += x_K[j]
-                if int(b_S[k]) != 0:
-                    expr += 1
-                s_vec_K.append(expr)
-            sK = sum(s_vec_K[k] * (a**k) for k in range(n))
+            # ---------- FAST public build via Frobenius ----------
+            log_write(L, f"[map {amap}] building public polynomials via Frobenius fast path ...")
+            t0 = time.time()
+            y_vec_R = fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D)
 
-            # yK(x) = F(sK(x)) in K[x]
-            yK = F_univar(sK)
-
-            # Project to F2[x]
-            y_vec_R = coords_over_F2(yK, K, a, n, R)
-
-            # Apply A_T (no constant yet)
+            # z0 = A_T * y (no constant yet), then boolean-reduce
             z0_R = []
             for i in range(n):
                 acc = R(0)
                 for j in range(n):
                     if int(A_T[i, j]) != 0:
                         acc += y_vec_R[j]
-                z0_R.append(acc)
+                z0_R.append(boolean_reduce(acc, R))
 
-            # Boolean reduction
-            z0_R = [boolean_reduce(p, R) for p in z0_R]
+            log_write(L, f"[map {amap}] public system built in {time.time()-t0:.2f}s")
             degs = [p.total_degree() for p in z0_R]
             maxdeg = max(degs) if degs else -1
             log_write(L, f"[map {amap}] public max degree after Boolean: {maxdeg}")
@@ -332,11 +431,37 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                 log_write(L, f"[map {amap}] skipped: maxdeg < 2")
                 continue
 
-            # Precompute Jacobian derivs, install for workers
+            # ---------- Optional sanity: compare with slow path on random points ----------
+            if os.environ.get("HFE_SANITY") == "1":
+                s_vec_K = []
+                for k in range(n):
+                    expr = XK(0)
+                    for j in range(n):
+                        if int(A_S[k, j]) != 0: expr += x_K[j]
+                    if int(b_S[k]) != 0: expr += 1
+                    s_vec_K.append(expr)
+                sK = sum(s_vec_K[k] * (a**k) for k in range(n))
+                yK = F_univar(sK)
+                y_vec_R_slow = coords_over_F2(yK, K, a, n, R)
+                z0_R_slow = []
+                for i in range(n):
+                    acc = R(0)
+                    for j in range(n):
+                        if int(A_T[i, j]) != 0: acc += y_vec_R_slow[j]
+                    z0_R_slow.append(boolean_reduce(acc, R))
+                import random as _r
+                xs = R.gens()
+                for tcheck in range(16):
+                    pt = {xs[k]: F2(_r.getrandbits(1)) for k in range(n)}
+                    for p_fast, p_slow in zip(z0_R, z0_R_slow):
+                        if p_fast.subs(pt) != p_slow.subs(pt):
+                            raise RuntimeError("SANITY FAIL: fast != slow on some point.")
+                log_write(L, f"[map {amap}] SANITY: fast public == slow public on 16 random points")
+
+            # ---------- Jacobian precompute + parallel probing ----------
             derivs = precompute_jacobian_derivatives(z0_R, R)
             _install_worker_state(derivs, R, n)
 
-            # Parallel probing
             remaining = max_secret_tries
             success   = None           # (x_tuple, rankJ)
             best_rank_seen = -1
@@ -402,15 +527,17 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                             fut.cancel()
                         ex.shutdown(cancel_futures=True)
 
-            # Track best (for fallback)
+            # ---------- Track best (for fallback) ----------
             if best_rank_seen > best["rank"]:
                 best["rank"]   = best_rank_seen
                 best["bundle"] = (A_S, b_S, A_T, z0_R, vector(F2, best_point) if best_point else None, degs)
 
+            # ---------- Success path: finish instance ----------
             if success is not None:
                 x_tuple, rankJ = success
                 x_star = vector(F2, x_tuple)
 
+                # Choose b_T so P(x*) = 0
                 s_star  = A_S * x_star + b_S
                 sK_star = sum(int(s_star[i]) * (a**i) for i in range(n))
                 yK_star = F_univar(sK_star)
@@ -419,6 +546,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
 
                 z_fin = [p + R(int(b_T[i])) for i, p in enumerate(z0_R)]
 
+                # Sanity check
                 subst_eval = {x_R[i]: F2(int(x_star[i])) for i in range(n)}
                 if not all(p.subs(subst_eval) == 0 for p in z_fin):
                     log_write(L, f"[map {amap}] WARNING: P(x*) != 0 after setting b_T. Continuing.")
@@ -451,7 +579,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                     "secret_logfile": secret_logfile
                 }
 
-        # Fallback
+        # ---------- Fallback ----------
         if allow_fallback and best["rank"] >= 0 and best["bundle"] is not None:
             A_S, b_S, A_T, z0_R, x_star, degs = best["bundle"]
             if x_star is None:
@@ -558,8 +686,6 @@ def main():
     print(f"[{now_str()}] Log written to:        {logname}")
     print(f"[{now_str()}] Secret log written to: {info.get('secret_logfile', secretlog)}")
     print(f"[{now_str()}] P(x*)=0: {info['ok_zero']}, rank(J_P(x*))={info['rankJ']}")
-
-
 
 if __name__ == "__main__":
     main()
