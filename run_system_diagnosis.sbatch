@@ -5,34 +5,34 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=32G
 #SBATCH --time=03:00:00
-#SBATCH --output=logs/sysdiag_%j.out
-#SBATCH --error=logs/sysdiag_%j.err
-# Set this to your repo so relative paths work even if you submit from elsewhere:
+# Write logs in CWD so there’s no missing-dir issue:
+#SBATCH --output=%x_%j.out
+#SBATCH --error=%x_%j.err
+# Work in your repo so relative paths are correct:
 #SBATCH --chdir=/home/fspreafichi/julia_grobner_pipeline
 
 set -euo pipefail
-set -x  # echo commands (helps a ton for debugging)
+set -x  # echo commands for debugging
 
+# --- Modules ---
 module load sagemath/10.6-singularity
 
-# Keep threads sane
+# --- Keep threads sane ---
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-mkdir -p logs
-
 usage() {
   echo "Usage:"
   echo "  Single file:"
-  echo "    sbatch run_system_diagnosis.sbatch data/hfe_instances/HFE_n32_D64.in [--dim=SECONDS] [--hilbert=SECONDS]"
+  echo "    sbatch run_system_diagnosis.sbatch data/HFE_n32_D64.in [--dim=SECONDS] [--hilbert=SECONDS]"
   echo
   echo "  Directory + array:"
-  echo "    sbatch --array=0-9 run_system_diagnosis.sbatch data/hfe_instances [--dim=20] [--hilbert=60]"
+  echo "    sbatch --array=0-9 run_system_diagnosis.sbatch data [--dim=20] [--hilbert=60]"
   echo
   echo "  Glob + array (quote the glob!):"
-  echo "    sbatch --array=0-9 run_system_diagnosis.sbatch 'data/hfe_instances/HFE_n*_D*.in' [--dim=20] [--hilbert=60]"
+  echo "    sbatch --array=0-9 run_system_diagnosis.sbatch 'data/HFE_n*_D*.in' [--dim=20] [--hilbert=60]"
   echo
   echo "  Manifest + array (one path per line):"
   echo "    sbatch --array=0-9 run_system_diagnosis.sbatch filelist.txt [--dim=20] [--hilbert=60]"
@@ -56,7 +56,7 @@ echo "[$(date)] CWD: $(pwd)"
 which sage || true
 sage -v || true
 
-# Select file (array-aware)
+# --- Select file (array-aware) ---
 SELECTED_FILE=""
 if [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
   declare -a FILES
@@ -92,7 +92,7 @@ if ((${#EXTRA_ARGS[@]})); then
   echo "[$(date)] Extra args → ${EXTRA_ARGS[*]}"
 fi
 
-# Now run it. The script itself implements the time budgets & logging.
+# Run (script writes its own detailed log alongside printing)
 sage scripts/system_diagnosis.sage "$SELECTED_FILE" "${EXTRA_ARGS[@]}"
 
 echo "[$(date)] ✅ Done"
