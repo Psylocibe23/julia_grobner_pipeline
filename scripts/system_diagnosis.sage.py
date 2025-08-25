@@ -11,9 +11,69 @@ _sage_const_0 = Integer(0); _sage_const_1 = Integer(1); _sage_const_2 = Integer(
 # properties of the system. These include variable count, sparsity, degrees,
 # homogeneity, Krull dimension, Hilbert polynomial, and more.
 # It is written for use in algebraic cryptanalysis and system profiling.
+#
+# NEW (fast/controlled heavy steps):
+#   - Optional time budgets for heavy algebra:
+#       --dim=SECONDS       attempt I.dimension() with timeout
+#       --hilbert=SECONDS   attempt I.hilbert_polynomial() with timeout
+#   - If not provided (or 0), those steps are SKIPPED (to avoid long hangs).
 ###############################################################################
 
-import sys
+import sys, os
+
+# Sage environment
+from sage.all import GF, PolynomialRing
+
+# --------------------------
+# Timeout helpers (Unix)
+# --------------------------
+class _Timeout(Exception):
+    pass
+
+def _run_with_timeout(fn, seconds, *args, **kwargs):
+    """
+    Run fn(*args, **kwargs) with a SIGALRM timeout (Unix only).
+    If seconds <= 0 or SIGALRM not available, run without timeout.
+    """
+    if not seconds or seconds <= _sage_const_0 :
+        return fn(*args, **kwargs)
+    try:
+        import signal
+    except Exception:
+        # Fallback: no signal -> no timeout
+        return fn(*args, **kwargs)
+
+    def _handler(signum, frame):
+        raise _Timeout()
+
+    old = signal.signal(signal.SIGALRM, _handler)
+    try:
+        signal.alarm(int(seconds))
+        return fn(*args, **kwargs)
+    finally:
+        signal.alarm(_sage_const_0 )
+        signal.signal(signal.SIGALRM, old)
+
+# --------------------------
+# CLI flag parsing (simple)
+# --------------------------
+def _pop_kv(argv, name):
+    """
+    Remove and return value if '--name=value' is present in argv. Else None.
+    """
+    prefix = f"--{name}="
+    for i, a in enumerate(list(argv)):
+        if a.startswith(prefix):
+            val = a[len(prefix):]
+            del argv[i]
+            return val
+    return None
+
+def _as_int_or_default(s, default):
+    try:
+        return int(s)
+    except Exception:
+        return default
 
 ############################
 # 1. Input parsing function
@@ -63,10 +123,19 @@ def is_homogeneous(poly):
 ############################
 def main():
     if len(sys.argv) < _sage_const_2 :
-        print("Usage: sage diagnose_system.sage <input_file.in>")
+        print("Usage: sage system_diagnosis.sage <input_file.in> [--dim=SECONDS] [--hilbert=SECONDS]")
         sys.exit(_sage_const_1 )
-    infile = sys.argv[_sage_const_1 ]
+
+    # Parse optional time budgets for heavy steps
+    argv = sys.argv[:]
+    infile = argv[_sage_const_1 ]
+    extra = argv[_sage_const_2 :]
+
+    dim_secs = _as_int_or_default(_pop_kv(extra, "dim"), _sage_const_0 )         # 0 = skip
+    hilb_secs = _as_int_or_default(_pop_kv(extra, "hilbert"), _sage_const_0 )    # 0 = skip
+
     outlog = infile.replace(".in", "_diagnostics.log").replace("data/", "logs/")
+    os.makedirs(os.path.dirname(outlog), exist_ok=True)
 
     # Parse the input file
     vars, F, field_desc, polys_str = parse_input_system(infile)
@@ -94,27 +163,47 @@ def main():
     log.append(f"All polynomials homogeneous? {all_homog}")
 
     # --- Krull dimension: geometric structure of solution set ---
-    try:
-        dim = I.dimension()
-        log.append(f"Krull dimension of the ideal: {dim}")
-        if dim == _sage_const_0 :
-            log.append("System is zero-dimensional (finite number of solutions).")
-        elif dim == -_sage_const_1 :
-            log.append("Ideal is the unit ideal (1 in the basis).")
-        else:
-            log.append("System is positive-dimensional (infinitely many solutions).")
-    except Exception as e:
-        log.append(f"Could not compute dimension: {e}")
+    # Controlled by --dim=SECONDS (0 → skipped)
+    have_dim = False
+    if dim_secs > _sage_const_0 :
+        try:
+            dim = _run_with_timeout(I.dimension, dim_secs)
+            have_dim = True
+            log.append(f"Krull dimension of the ideal: {dim}")
+            if dim == _sage_const_0 :
+                log.append("System is zero-dimensional (finite number of solutions).")
+            elif dim == -_sage_const_1 :
+                log.append("Ideal is the unit ideal (1 in the basis).")
+            else:
+                log.append("System is positive-dimensional (infinitely many solutions).")
+        except _Timeout:
+            log.append(f"Krull dimension of the ideal: timed out after {dim_secs}s (skipped).")
+        except Exception as e:
+            log.append(f"Could not compute dimension: {e}")
+    else:
+        log.append("Krull dimension of the ideal: skipped (pass --dim=SECONDS to attempt).")
 
     # --- Degree of the ideal (Hilbert polynomial) ---
+    # Controlled by --hilbert=SECONDS (0 → skipped)
     # Ideal degree (Hilbert polynomial at zero for zero-dim)
-    try:
-        hilb = I.hilbert_polynomial()
-        # For zero-dimensional ideals, hilb(0) equals the number of solutions (counted with multiplicity)
-        degI = hilb(_sage_const_0 ) if I.dimension() == _sage_const_0  else hilb.degree()
-        log.append(f"Degree of the ideal (zero-dim: number of points, else: degree of Hilbert polynomial): {degI}")
-    except Exception as e:
-        log.append(f"Could not compute ideal degree (Hilbert polynomial): {e}")
+    if hilb_secs > _sage_const_0 :
+        try:
+            hilb = _run_with_timeout(I.hilbert_polynomial, hilb_secs)
+            # Preserve your original wording/logic, but avoid a second heavy call to I.dimension()
+            try:
+                if have_dim and dim == _sage_const_0 :
+                    degI = hilb(_sage_const_0 )
+                else:
+                    degI = hilb.degree()
+            except Exception:
+                degI = hilb.degree()
+            log.append(f"Degree of the ideal (zero-dim: number of points, else: degree of Hilbert polynomial): {degI}")
+        except _Timeout:
+            log.append(f"Degree of the ideal: timed out after {hilb_secs}s (skipped).")
+        except Exception as e:
+            log.append(f"Could not compute ideal degree (Hilbert polynomial): {e}")
+    else:
+        log.append("Degree of the ideal (Hilbert polynomial): skipped (pass --hilbert=SECONDS to attempt).")
 
     # No shape position/lex basis attempted!
     log.append("Shape position check skipped (lex Groebner basis not computed).")
@@ -124,7 +213,7 @@ def main():
     log.append(f"System is Boolean quadratic? {'Yes' if is_boolean else 'No'}")
     is_quadratic = all(p.total_degree() <= _sage_const_2  for p in polynomials)
     log.append(f"System is quadratic (all degree ≤2)? {'Yes' if is_quadratic else 'No'}")
-    
+
     # Save log
     with open(outlog, "w") as f:
         for line in log:
