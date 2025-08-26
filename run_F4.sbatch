@@ -1,37 +1,36 @@
-#!/bin/bash -l
+#!/bin/bash
 #SBATCH --job-name=gb_F4
 #SBATCH --partition=turing-long
-#SBATCH --chdir=/home/fspreafichi/julia_grobner_pipeline
-#SBATCH --output=gb_F4_%j.out         # write to CWD (guaranteed to exist)
-#SBATCH --error=gb_F4_%j.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=08:00:00
-
-# Usage:
-#   sbatch run_F4.sbatch data/HFE_n5_D6.in [threads]
+#SBATCH --chdir=/home/fspreafichi/julia_grobner_pipeline
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 
 set -euo pipefail
-set -x
 
-# Make places for *your* logs/results (this happens after Slurm has opened stdout/err)
+# Match sysdiag: make sure these exist where Slurm writes logs
 mkdir -p logs results
 
+# Args: identical style to sysdiag
 if [[ $# -lt 1 ]]; then
   echo "Usage: sbatch run_F4.sbatch <input_file.in> [threads]"
   exit 1
 fi
 
 INPUT_FILE="$1"
+shift || true
 if [[ ! -f "$INPUT_FILE" ]]; then
-  echo "ERROR: file not found: $INPUT_FILE"
+  echo "Input file not found: $INPUT_FILE"
   exit 2
 fi
 
-THREADS="${2:-${SLURM_CPUS_PER_TASK:-8}}"
+# Threads: [arg] > SLURM_CPUS_PER_TASK > 8
+THREADS="${1:-${SLURM_CPUS_PER_TASK:-8}}"
 
-# keep math libs quiet; give Julia threads
+# Keep math libs from oversubscribing
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -43,12 +42,19 @@ echo "[$(date)] CWD: $(pwd)"
 echo "[$(date)] Input: $INPUT_FILE"
 echo "[$(date)] Threads: $THREADS"
 
-module load julia || { echo "module load julia failed"; exit 3; }
-which julia
-julia -v
-julia -e 'println("Julia smoke test ok; Threads=",Threads.nthreads())'
+# Clean module env (optional but helps) then load Julia
+module purge >/dev/null 2>&1 || true
+module load julia
 
+# Smoke test so we see immediate failures in this job’s stdout
+which julia || { echo "julia not in PATH"; exit 3; }
+julia -v
+julia -e 'println("Julia smoke test ok; Threads=", Threads.nthreads())'
+
+# If AlgebraicSolving isn’t preinstalled, this will error *and* the message
+# will land in logs/gb_F4_<jobid>.err/out so you can see it.
 julia scripts/solve_F4_from_file.jl "$INPUT_FILE" "$THREADS"
 
 echo "[$(date)] Listing results/:"
 ls -lh results || true
+echo "[$(date)] ✅ Done"
