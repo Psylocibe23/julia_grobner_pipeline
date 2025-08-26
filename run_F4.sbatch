@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #SBATCH --job-name=gb_F4
 #SBATCH --partition=turing-long
 #SBATCH --ntasks=1
@@ -6,13 +6,13 @@
 #SBATCH --mem=64G
 #SBATCH --time=08:00:00
 #SBATCH --chdir=/home/fspreafichi/julia_grobner_pipeline
-#SBATCH --output=logs/%x_%j.out
-#SBATCH --error=logs/%x_%j.err
+#SBATCH --output=%x_%j.out        # write logs in CWD so no missing-dir issue
+#SBATCH --error=%x_%j.err
 
 set -euo pipefail
+set -x
 
-mkdir -p logs results
-
+# Args: sbatch run_F4.sbatch data/HFE_n6_D6.in [threads]
 if [[ $# -lt 1 ]]; then
   echo "Usage: sbatch run_F4.sbatch <input_file.in> [threads]"
   exit 1
@@ -26,8 +26,11 @@ if [[ ! -f "$INPUT_FILE" ]]; then
   exit 2
 fi
 
-# Avoid BLAS/OpenMP storms; set Julia threads
-export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+# Keep math libs from oversubscribing; give Julia threads
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 export JULIA_NUM_THREADS="$THREADS"
 
 echo "[$(date)] Node(s): ${SLURM_JOB_NODELIST:-unknown}"
@@ -35,14 +38,24 @@ echo "[$(date)] CWD: $(pwd)"
 echo "[$(date)] Input: $INPUT_FILE"
 echo "[$(date)] Threads: $THREADS"
 
+# Make sure module command exists even on non-login shells
+if ! type module >/dev/null 2>&1; then
+  # Common init locations; harmless if missing
+  [[ -f /etc/profile ]] && source /etc/profile
+  [[ -f /etc/profile.d/modules.sh ]] && source /etc/profile.d/modules.sh
+fi
+
 module load julia
 which julia
 julia -v
 julia -e 'println("Julia smoke test ok; Threads=", Threads.nthreads())'
 
+# Ensure your output folders exist (for files created by the Julia script)
+mkdir -p logs results
+
+# Run the solver
 julia scripts/solve_F4_from_file.jl "$INPUT_FILE" "$THREADS"
 
 echo "[$(date)] Listing results/:"
 ls -lh results || true
 echo "[$(date)] ✅ Done"
-
