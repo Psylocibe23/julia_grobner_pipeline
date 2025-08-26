@@ -5,13 +5,12 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=08:00:00
-#SBATCH --chdir=/home/fspreafichi/julia_grobner_pipeline
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
-set -Eeuo pipefail
+set -euo pipefail
 
-# Ensure these exist (where Slurm writes logs & where Julia writes results)
+# Ensure these exist
 mkdir -p logs results
 
 if [[ $# -lt 1 ]]; then
