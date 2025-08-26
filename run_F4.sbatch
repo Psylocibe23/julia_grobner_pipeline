@@ -1,4 +1,3 @@
-cat > run_F4.sbatch <<'EOF'
 #!/bin/bash
 #SBATCH --job-name=gb_F4
 #SBATCH --partition=turing-long
@@ -46,4 +45,4 @@ julia scripts/solve_F4_from_file.jl "$INPUT_FILE" "$THREADS"
 echo "[$(date)] Listing results/:"
 ls -lh results || true
 echo "[$(date)] ✅ Done"
-EOF
+
