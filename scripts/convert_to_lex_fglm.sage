@@ -26,53 +26,58 @@
 #   <poly_2>
 #   ...
 #
-# USAGE
-#   sage scripts/convert_to_lex_fglm.sage results/<name>_F4_<timestamp>.txt
+# New CLI flags (all optional):
+#   --assume-zerodim          : skip Krull-dimension check (treat as 0-dim)
+#   --dim-timeout=SECONDS     : time budget for I_drl.dimension() (default 60)
+#   --fglm-timeout=SECONDS    : time budget for the FGLM call (default 0 = no cap)
+#   --reduce=never|auto|always: reduce the LEX basis (default auto)
+#   --reduce-timeout=SECONDS  : time budget for reduction (default 60 in auto/always)
 #
-# OUTPUT
-#   results/<stem>_LEX.txt : LEX basis + headers
-#   logs/<stem>_FGLM.log   : verbose run log (parsing, stats, timings)
+# Examples:
+#   sage scripts/convert_to_lex_fglm.sage results/HFE_n5_D6_F4_...txt \
+#        --assume-zerodim --fglm-timeout=600 --reduce=auto --reduce-timeout=120
 #
 ###############################################################################
 
-import sys, os, time
 
-############################
-# 0) Utilities: filesystem
-############################
+import sys, os, time, signal
+
+# ---------------- Utilities ----------------
 def ensure_dir(path):
-    """Create directory `path` if it does not exist (idempotent)."""
     if not os.path.exists(path):
         os.makedirs(path)
 
 def stem_of(path):
-    """Return filename stem without extension, e.g. 'foo/bar/a.txt' → 'a'."""
     return os.path.splitext(os.path.basename(path))[0]
 
-############################
-# 1) Logger utility
-############################
 def log_and_print(msg, fh=None):
-    """Print to stdout and (optionally) mirror to an open log file handle."""
     print(msg, flush=True)
     if fh is not None:
-        fh.write(msg + "\n")
-        fh.flush()
+        fh.write(msg + "\n"); fh.flush()
 
-############################
-# 2) Parse the DRL-basis file
-############################
+class _Timeout(Exception): pass
+def _timeout_handler(signum, frame):  # noqa: ARG001
+    raise _Timeout
+
+def run_with_timeout(fn, seconds, on_timeout=None):
+    """Run fn() with a SIGALRM timeout. seconds<=0 means no timeout."""
+    if seconds and seconds > 0:
+        old = signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(int(seconds))
+        try:
+            return fn()
+        except _Timeout:
+            if on_timeout:
+                return on_timeout()
+            raise
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
+    else:
+        return fn()
+
+# ---------------- Parsing the DRL-basis file ----------------
 def read_groebner_basis_file(result_file):
-    """
-    Parse the F4 output file and extract:
-      • variables : list[str]
-      • field_p   : int (the characteristic p; prime field)
-      • order     : str (expected 'degrevlex')
-      • polys     : list[str] of basis polynomials (string form)
-
-    We search headers flexibly, then read everything after the
-    '# --- Groebner basis ---' marker as polynomial lines.
-    """
     variables, field_p, order = None, None, None
     basis_start = None
     polys = []
@@ -80,26 +85,21 @@ def read_groebner_basis_file(result_file):
     with open(result_file, "r") as f:
         lines = f.readlines()
 
-    # Pass 1: headers
     for i, line in enumerate(lines):
         s = line.strip()
         if s.startswith("# Variables:"):
-            # e.g., "# Variables: x0, x1, x2"
             variables = [v.strip() for v in s.split(":", 1)[1].split(",")]
         elif s.startswith("# Field:"):
-            # e.g., "# Field: GF(7)" (we accept only this; F4 stage enforces GF(p))
             try:
                 inside = s.split("GF(", 1)[1].split(")", 1)[0].strip()
                 if "^" in inside:
-                    # F4 stage forbids p^n (we fallback to base p just for logging)
-                    base, _exp = inside.split("^", 1)
+                    base, _ = inside.split("^", 1)
                     field_p = int(base.strip())
                 else:
                     field_p = int(inside)
             except Exception:
-                raise ValueError("Could not parse field from header line: '{}'".format(s))
+                raise ValueError(f"Could not parse field from header line: '{s}'")
         elif s.startswith("# Order:"):
-            # e.g., "# Order: degrevlex"
             order = s.split(":", 1)[1].strip()
         elif s.startswith("# --- Groebner basis ---"):
             basis_start = i + 1
@@ -109,34 +109,21 @@ def read_groebner_basis_file(result_file):
         raise ValueError("Header '# Variables:' not found.")
     if field_p is None:
         raise ValueError("Header '# Field: GF(p)' not found.")
-    if order is None:
-        order = "UNKNOWN"  # not fatal, but useful for diagnostics
     if basis_start is None:
         raise ValueError("Marker '# --- Groebner basis ---' not found; cannot read basis.")
 
-    # Pass 2: basis polynomials
     for line in lines[basis_start:]:
         s = line.strip()
         if s and not s.startswith("#"):
             polys.append(s)
-
     if not polys:
         raise ValueError("No polynomials found after the basis marker.")
 
-    return variables, field_p, order, polys
+    return variables, field_p, (order or "UNKNOWN"), polys
 
-############################
-# 3) Shape-position checks
-############################
+# ---------------- Shape-position checks ----------------
 def shape_heuristic(variables, G_lex):
-    """
-    Heuristic 'shape position' test for a LEX Gröbner basis G_lex over vars.
-    Check that leading monomials are *pure powers* and that the sequence of
-    leading variables is nondecreasing in lex order when sorted by lm.
-    Sufficient (not necessary) for triangular form.
-    """
     try:
-        # Sort by leading term (largest first in lex) to stabilize the scan
         G_sorted = sorted(G_lex, key=lambda g: g.lm(), reverse=True)
         lead_vars = []
         for g in G_sorted:
@@ -156,58 +143,65 @@ def shape_heuristic(variables, G_lex):
         return False
 
 def shape_strict(variables, G_lex):
-    """
-    Strict/triangular shape (what back-substitution really uses):
-      G has the form:
-          x0 - f0(x1,...,xn-1),  x1 - f1(x2,...,xn-1), ..., g(xn-1)
-    Equivalent practical checks (in LEX with variables[0] > ... > variables[-1]):
-      • Exactly one polynomial univariate in the last variable v_last;
-      • For each k = n-2..0 there exists a polynomial whose LM is variables[k]^1
-        (hence linear in that variable).
-    """
     if not G_lex:
         return False
     R = G_lex[0].parent()
     gens = {str(g): g for g in R.gens()}
     n = len(variables)
     v_last = variables[-1]
-
-    # (1) exactly one univariate in the last variable
     univars = [g for g in G_lex if set(map(str, g.variables())) <= {v_last}]
     if len(univars) != 1:
         return False
-
-    # (2) for k = n-2 .. 0: LM equals var^1 and degree(var)=1 in that polynomial
     for k in range(n-2, -1, -1):
         v = gens[variables[k]]
-        cand = [g for g in G_lex if g.lm() == v]   # LM exactly v^1
+        cand = [g for g in G_lex if g.lm() == v]
         if len(cand) != 1:
             return False
         if cand[0].degree(v) != 1:
             return False
     return True
 
-############################
-# 4) Main driver
-############################
+# ---------------- Main ----------------
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: sage scripts/convert_to_lex_fglm.sage path/to/F4_result.txt")
+    from sage.all import GF, PolynomialRing  # lazy import so script starts quickly
+
+    if len(sys.argv) < 2:
+        print("Usage: sage scripts/convert_to_lex_fglm.sage <F4_result.txt> [--assume-zerodim] "
+              "[--dim-timeout=SECONDS] [--fglm-timeout=SECONDS] "
+              "[--reduce=never|auto|always] [--reduce-timeout=SECONDS]")
         sys.exit(1)
 
     result_file = sys.argv[1]
+    # defaults
+    assume_zerodim = False
+    dim_timeout = 60
+    fglm_timeout = 0          # 0 == unlimited
+    reduce_mode = "auto"      # never|auto|always
+    reduce_timeout = 60
 
-    # Prepare folders and output names
+    # parse flags
+    for a in sys.argv[2:]:
+        if a == "--assume-zerodim":
+            assume_zerodim = True
+        elif a.startswith("--dim-timeout="):
+            dim_timeout = int(a.split("=",1)[1])
+        elif a.startswith("--fglm-timeout="):
+            fglm_timeout = int(a.split("=",1)[1])
+        elif a.startswith("--reduce="):
+            reduce_mode = a.split("=",1)[1].strip().lower()
+        elif a.startswith("--reduce-timeout="):
+            reduce_timeout = int(a.split("=",1)[1])
+        else:
+            print(f"Unknown flag '{a}'"); sys.exit(2)
+
     results_dir = "results"
     logs_dir    = "logs"
-    ensure_dir(results_dir)
-    ensure_dir(logs_dir)
+    ensure_dir(results_dir); ensure_dir(logs_dir)
 
     base_name   = stem_of(result_file)
     lex_outfile = os.path.join(results_dir, base_name + "_LEX.txt")
     log_outfile = os.path.join(logs_dir,    base_name + "_FGLM.log")
 
-    # Open the log file
     with open(log_outfile, "w") as log:
         log_and_print("==============================================================", log)
         log_and_print(" FGLM CONVERSION — DRL → LEX (Sage/Singular backend)", log)
@@ -217,7 +211,6 @@ def main():
         log_and_print("--------------------------------------------------------------", log)
 
         try:
-            # ---- Parse input headers + basis ----
             log_and_print("Parsing input (headers and DRL basis)...", log)
             variables, p, in_order, polys_str = read_groebner_basis_file(result_file)
             log_and_print(f"Variables: {variables}", log)
@@ -225,71 +218,96 @@ def main():
             log_and_print(f"Order(in): {in_order}", log)
             log_and_print(f"Basis size (input): {len(polys_str)}", log)
 
-            # ---- Build DRL ring/ideal in Sage ----
             log_and_print("Constructing DRL ring and ideal...", log)
             R_drl = PolynomialRing(GF(p), variables, order='degrevlex')
             G_drl = [R_drl(s) for s in polys_str]
             I_drl = R_drl.ideal(G_drl)
 
-            # ---- Quick stats on the input basis ----
+            # (Optional) tiny input stat
             try:
                 degs = [g.total_degree() for g in G_drl]
-                log_and_print(f"Degrees(in): max={max(degs)}, list={degs}", log)
+                log_and_print(f"Degrees(in): max={max(degs)}, list(first 10)={degs[:10]}{'...' if len(degs)>10 else ''}", log)
             except Exception as e:
                 log_and_print(f"Warning: could not compute input degrees: {e}", log)
 
-            # ---- Zero-dimensionality (FGLM precondition) ----
-            log_and_print("Checking zero-dimensionality (Krull dimension == 0)...", log)
-            dim = I_drl.dimension()
-            log_and_print(f"Krull dimension: {dim}", log)
+            # Zero-dim check
+            if assume_zerodim:
+                log_and_print("Skipping dimension() (assume zero-dimensional).", log)
+                dim = 0
+            else:
+                log_and_print(f"Checking zero-dimensionality with timeout {dim_timeout}s...", log)
+                def _dim():  # compute dimension
+                    return I_drl.dimension()
+                try:
+                    dim = run_with_timeout(_dim, dim_timeout)
+                    log_and_print(f"Krull dimension: {dim}", log)
+                except _Timeout:
+                    log_and_print(f"dimension() timed out after {dim_timeout}s — treating as zero-dimensional for FGLM.", log)
+                    dim = 0
+
             if dim != 0:
                 log_and_print("ERROR: Ideal is not zero-dimensional. FGLM requires dim = 0.", log)
                 raise ValueError("Non-zero-dimensional ideal; aborting FGLM.")
 
-            # ---- Build LEX ring ----
+            # Build LEX ring
+            from sage.all import GF as _GF, PolynomialRing as _PR  # (local alias to look explicit in logs)
             log_and_print("Constructing LEX ring...", log)
-            R_lex = PolynomialRing(GF(p), variables, order='lex')
+            R_lex = _PR(_GF(p), variables, order='lex')
 
-            # ---- FGLM conversion ----
-            log_and_print("Running FGLM (Ideal.transformed_basis('fglm', R_lex))...", log)
+            # FGLM
+            log_and_print(f"Running FGLM (timeout {fglm_timeout or '∞'}s)...", log)
             t0 = time.time()
-            # This computes a GB in the *target* ring/order using the FGLM algorithm.
-            G_lex_fglm = I_drl.transformed_basis('fglm', R_lex)
+            def _run_fglm():
+                return I_drl.transformed_basis('fglm', R_lex)
+            try:
+                G_lex_fglm = run_with_timeout(_run_fglm, fglm_timeout)
+            except _Timeout:
+                log_and_print(f"FGLM timed out after {fglm_timeout}s.", log)
+                raise
             t1 = time.time()
-            log_and_print(f"FGLM wall time: {t1 - t0:.6f} s", log)
+            log_and_print(f"FGLM wall time: {t1 - t0:.3f} s", log)
 
-            # ---- Normalization: ensure a reduced LEX basis ----
-            log_and_print("Ensuring LEX basis is reduced (normalization)...", log)
-            I_lex = R_lex.ideal(G_lex_fglm)
-            G_lex = I_lex.groebner_basis()   # reduced GB in LEX (Singular backend)
+            # Reduce?
+            reduce_mode_norm = reduce_mode.lower()
+            log_and_print(f"Post-processing LEX basis (reduce={reduce_mode_norm}, timeout={reduce_timeout}s)...", log)
+            if reduce_mode_norm == "never":
+                G_lex = G_lex_fglm
+            else:
+                I_lex = R_lex.ideal(G_lex_fglm)
+                def _reduce():
+                    return I_lex.groebner_basis()
+                try:
+                    G_lex = run_with_timeout(_reduce, reduce_timeout if reduce_mode_norm in ("auto","always") else 0)
+                except _Timeout:
+                    if reduce_mode_norm == "auto":
+                        log_and_print("Reduction timed out — keeping *unreduced* LEX basis from FGLM.", log)
+                        G_lex = G_lex_fglm
+                    else:
+                        log_and_print("Reduction timed out and reduce=always → aborting.", log)
+                        raise
 
-            # ---- Output stats ----
             out_degs = [g.total_degree() for g in G_lex]
             log_and_print(f"Basis size(out): {len(G_lex)}", log)
-            log_and_print(f"Degrees(out): max={max(out_degs)}, list={out_degs}", log)
+            log_and_print(f"Degrees(out): max={max(out_degs)}, list(first 10)={out_degs[:10]}{'...' if len(out_degs)>10 else ''}", log)
 
-            # ---- Shape position (heuristic + strict) ----
             shape_h = shape_heuristic(variables, G_lex)
             shape_s = shape_strict(variables, G_lex)
             log_and_print(f"Shape position (heuristic): {shape_h}", log)
             log_and_print(f"Shape position (strict):    {shape_s}", log)
 
-            # ---- Write LEX basis file with stable headers ----
             log_and_print(f"Writing LEX basis to: {lex_outfile}", log)
             with open(lex_outfile, "w") as out:
                 out.write(f"# Lex Groebner basis (FGLM) for {result_file}\n")
                 out.write(f"# Variables: {', '.join(variables)}\n")
                 out.write(f"# Field: GF({p})\n")
                 out.write(f"# Order: lex\n")
-                out.write(f"# Basis: reduced=True\n")
+                out.write(f"# Basis: reduced={'True' if G_lex is not G_lex_fglm else 'Unknown'}\n")
                 out.write(f"# Zero-dimensional: True\n")
-                # Write **strict** shape result (this is what your extractor expects)
                 out.write(f"# Shape position: {shape_s}\n")
                 out.write("# --- Groebner basis (LEX) ---\n")
                 for g in G_lex:
                     out.write(str(g) + "\n")
 
-            # ---- Echo representative lines to log ----
             log_and_print("LEX basis (first few polynomials):", log)
             for g in G_lex[:min(5, len(G_lex))]:
                 log_and_print("  " + str(g), log)
@@ -298,7 +316,6 @@ def main():
             log_and_print("FGLM conversion COMPLETE.", log)
 
         except Exception as e:
-            # Log and re-raise (so your batch system will mark the job as failed)
             import traceback
             log_and_print("FGLM conversion FAILED with an exception:", log)
             log_and_print(str(e), log)
