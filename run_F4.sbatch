@@ -1,22 +1,21 @@
-#!/bin/bash
+#!/bin/bash -l
 #SBATCH --job-name=gb_F4
-#SBATCH --output=%x_%j.out
-#SBATCH --error=%x_%j.err
+#SBATCH --partition=turing-long
 #SBATCH --chdir=/home/fspreafichi/julia_grobner_pipeline
+#SBATCH --output=logs/gb_F4_%j.out
+#SBATCH --error=logs/gb_F4_%j.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=01:00:00
-#SBATCH --mem=32G
+#SBATCH --mem=64G
+#SBATCH --time=08:00:00
 
 # Usage:
-#   sbatch run_F4.sbatch <input_file.in> [threads]
-# Examples:
-#   sbatch run_F4.sbatch data/HFE_n5_D6.in
-#   sbatch --cpus-per-task=16 run_F4.sbatch data/HFE_n32_D64.in
-#   sbatch run_F4.sbatch data/HFE_n32_D64.in 12
+#   sbatch run_F4.sbatch data/HFE_n5_D6.in [threads]
 
 set -euo pipefail
 set -x
+
+mkdir -p logs results
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: sbatch run_F4.sbatch <input_file.in> [threads]"
@@ -26,16 +25,13 @@ fi
 INPUT_FILE="$1"
 if [[ ! -f "$INPUT_FILE" ]]; then
   echo "ERROR: file not found: $INPUT_FILE"
-  exit 1
+  exit 2
 fi
 
-# Decide threads: arg > SLURM_CPUS_PER_TASK > 8
+# threads: arg > SLURM_CPUS_PER_TASK > 8
 THREADS="${2:-${SLURM_CPUS_PER_TASK:-8}}"
 
-# Make sure relative output paths exist
-mkdir -p logs results
-
-# Avoid BLAS/OpenMP oversubscription; enable Julia threads
+# keep math libs quiet
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -47,8 +43,15 @@ echo "[$(date)] CWD: $(pwd)"
 echo "[$(date)] Input: $INPUT_FILE"
 echo "[$(date)] Threads: $THREADS"
 
-module load julia
+module load julia || { echo "module load julia failed"; exit 3; }
+which julia
+julia -v
+
+# tiny sanity probe so we know Julia actually runs
+julia -e 'println("Julia smoke test ok; Threads=",Threads.nthreads())'
+
+# run the solver
 julia scripts/solve_F4_from_file.jl "$INPUT_FILE" "$THREADS"
 
-echo "[$(date)] Listing results/ after run:"
+echo "[$(date)] Listing results/:"
 ls -lh results || true
