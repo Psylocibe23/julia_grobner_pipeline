@@ -2,8 +2,8 @@
 #SBATCH --job-name=gb_F4
 #SBATCH --partition=turing-long
 #SBATCH --chdir=/home/fspreafichi/julia_grobner_pipeline
-#SBATCH --output=logs/gb_F4_%j.out
-#SBATCH --error=logs/gb_F4_%j.err
+#SBATCH --output=gb_F4_%j.out         # write to CWD (guaranteed to exist)
+#SBATCH --error=gb_F4_%j.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
@@ -15,6 +15,7 @@
 set -euo pipefail
 set -x
 
+# Make places for *your* logs/results (this happens after Slurm has opened stdout/err)
 mkdir -p logs results
 
 if [[ $# -lt 1 ]]; then
@@ -28,10 +29,9 @@ if [[ ! -f "$INPUT_FILE" ]]; then
   exit 2
 fi
 
-# threads: arg > SLURM_CPUS_PER_TASK > 8
 THREADS="${2:-${SLURM_CPUS_PER_TASK:-8}}"
 
-# keep math libs quiet
+# keep math libs quiet; give Julia threads
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -46,11 +46,8 @@ echo "[$(date)] Threads: $THREADS"
 module load julia || { echo "module load julia failed"; exit 3; }
 which julia
 julia -v
-
-# tiny sanity probe so we know Julia actually runs
 julia -e 'println("Julia smoke test ok; Threads=",Threads.nthreads())'
 
-# run the solver
 julia scripts/solve_F4_from_file.jl "$INPUT_FILE" "$THREADS"
 
 echo "[$(date)] Listing results/:"
