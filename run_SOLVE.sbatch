@@ -3,8 +3,8 @@
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --time=01:00:00
-#SBATCH --mem=32G
+#SBATCH --time=08:00:00
+#SBATCH --mem=64G
 
 # Usage:
 #   sbatch run_SOLVE.sbatch <LEX_basis_file.txt>
