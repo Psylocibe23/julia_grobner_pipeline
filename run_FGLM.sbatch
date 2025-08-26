@@ -7,7 +7,6 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=64G
 #SBATCH --time=08:00:00
-#SBATCH --chdir=/home/fspreafichi/julia_grobner_pipeline
 
 set -euo pipefail
 set -x
