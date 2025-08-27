@@ -220,11 +220,23 @@ def solve_shape_lex_branch(R, variables, G_lex, F, log=None,
 
     # Pruning: if any g becomes a nonzero constant under current partial assignment → dead branch
     def prunable(assign_dict):
+        """
+        Return True if any g ∈ G_lex becomes a nonzero constant under 'assign_dict'.
+        Works for both polynomial results and base-field scalars (GF(p) elements).
+        """
+        F = R.base_ring()
         for g in G_lex:
             h = g.subs(assign_dict)
-            if h.is_constant() and h != 0:
-                return True
+            # Polynomial case
+            if hasattr(h, "is_constant"):
+                if h.is_constant() and h != 0:
+                    return True
+            else:
+                # Scalar in base field (or Python int) → treat as constant
+                if h != 0:
+                    return True
         return False
+
 
     solutions = []
     nodes = 0
@@ -277,8 +289,13 @@ def solve_shape_lex_branch(R, variables, G_lex, F, log=None,
                 stack.append((k-1, assign))
                 continue
 
-            if pk.is_constant():
-                # Constant nonzero would have been pruned; zero constant handled above
+            # If the constraint became constant (zero handled above), just move on.
+            if hasattr(pk, "is_constant"):
+                if pk.is_constant():
+                    stack.append((k-1, assign))
+                    continue
+            else:
+                # Base-field scalar: constant by definition (nonzero would have been pruned)
                 stack.append((k-1, assign))
                 continue
 
