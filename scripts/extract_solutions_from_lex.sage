@@ -1,3 +1,5 @@
+#!/usr/bin/env sage
+# -*- coding: utf-8 -*-
 ###############################################################################
 # extract_solutions_from_lex.sage  —  Solution extraction from a LEX GB
 #
@@ -5,22 +7,35 @@
 #   Given a Gröbner basis G in **LEX** order over GF(p) — typically obtained by
 #   the FGLM stage — extract **all solutions** in the base field GF(p).
 #
+# KEY CHANGES FOR SCALE/ROBUSTNESS (compared to earlier version)
+#   • We DO NOT call I.dimension() by default (that triggered a Hilbert-series
+#     computation in Singular, which can overflow on larger systems).
+#   • We DO NOT build elimination ideals by default. If the LEX GB does not
+#     contain a univariate in the last variable, we try both values in GF(2)
+#     (or iterate over small base fields), which is cheap and avoids Groebner calls.
+#
 # STRATEGY
 #   1) Parse headers and the LEX basis polynomials from the input file.
 #   2) Build R = GF(p)[variables] with 'lex' order and form the ideal I.
 #   3) Fast route for scale:
-#        • Identify (or *force* via elimination) a univariate in the last var.
-#        • Solve it over GF(p), then **branch with pruning** up the chain:
+#        • Look for a univariate in the last variable; if found, solve it in F.
+#        • Else (default) just try all values of the last variable in F
+#          (for GF(2), {0,1}), and branch upward with pruning.
+#        • At each step:
 #            - substitute assigned vars,
 #            - if any polynomial becomes a nonzero constant → prune branch,
 #            - otherwise solve next variable (linear closed form if deg=1,
-#              general roots over GF(p) if deg>1; if not univariate, try GF(2) values).
+#              general roots over GF(p) if deg>1; if not univariate, try small values).
 #   4) Verify each candidate against the full LEX basis and deduplicate.
-#   5) Fallback (optional): I.variety(GF(p)) if fast route yields nothing.
+#   5) Optional fallback (SMALL systems only): I.variety(GF(p)).
 #
 # CLI
 #   sage scripts/extract_solutions_from_lex.sage results/<stem>_LEX.txt \
-#        [--first-only] [--max-solutions N] [--node-limit N] [--no-fallback]
+#        [--first-only] [--max-solutions N] [--node-limit N] \
+#        [--no-fallback] [--check-dim] [--elim]
+#
+#   --check-dim  : force computing I.dimension() (SLOW / can overflow; default OFF)
+#   --elim       : allow elimination-ideal fallback for last variable (default OFF)
 #
 # OUTPUT
 #   results/<stem>_LEX_sols.txt    : one solution per line, e.g. {x0: 1, x1: 0}
@@ -28,7 +43,7 @@
 #
 ###############################################################################
 
-import sys, os, time, re
+import sys, os, time
 from sage.all import GF, PolynomialRing
 
 ############################
@@ -52,11 +67,11 @@ def log_and_print(msg, fh=None):
 ############################
 def read_lex_basis_file(lex_file):
     """
-    Read headers and polynomials from a LEX GB file produced by convert_to_lex_fglm.sage.
+    Read headers and polynomials from a LEX GB file produced by fglm_adjusted.sage.
 
-    Returns: (variables, p, order, polys_as_strings, shape_hdr_or_None)
+    Returns: (variables, p, order, polys_as_strings, shape_hdr_or_None, zerodim_hdr_or_None)
     """
-    variables, p, order, shape_hdr = None, None, None, None
+    variables, p, order, shape_hdr, zerodim_hdr = None, None, None, None, None
     polys_str = []
     basis_start = None
 
@@ -83,6 +98,9 @@ def read_lex_basis_file(lex_file):
         elif s.startswith("# Shape position:"):
             txt = s.split(":", 1)[1].strip()
             shape_hdr = (txt.lower() == "true")
+        elif s.startswith("# Zero-dimensional:"):
+            txt = s.split(":", 1)[1].strip()
+            zerodim_hdr = (txt.lower() == "true")
         elif s.startswith("# --- Groebner basis"):
             basis_start = i + 1
             break
@@ -103,7 +121,7 @@ def read_lex_basis_file(lex_file):
     if not polys_str:
         raise ValueError("No polynomials found after the basis marker.")
 
-    return variables, p, order, polys_str, shape_hdr
+    return variables, p, order, polys_str, shape_hdr, zerodim_hdr
 
 ############################
 # 2) Shape-position check (sufficient, not necessary)
@@ -178,15 +196,18 @@ def roots_over_field_univariate(poly_mv, var, R, F):
 # 4) Branching triangular solver with pruning
 ############################
 def solve_shape_lex_branch(R, variables, G_lex, F, log=None,
+                           allow_elimination=False,
                            first_only=False, max_solutions=None, max_nodes=10_000_000):
     """
     Branching solver for triangular-ish LEX bases.
 
-    • Guarantees a last-variable eliminant (via elimination if needed).
+    • Preferred start: pick a univariate in the last variable x_{n-1} if present.
+      If none and allow_elimination=True, try an elimination ideal (may be heavy).
+      Otherwise, simply iterate over all a ∈ F for x_{n-1} (cheap for GF(2)).
     • DFS with aggressive pruning:
         - if any g ∈ G_lex reduces (under current partial assignment) to a nonzero constant, prune.
         - if step polynomial for vk is univariate: solve over F (linear shortcut if deg=1).
-        - if not univariate (rare in clean LEX GB): for GF(2), try both {0,1}; else try roots if available.
+        - if not univariate: for GF(2) try {0,1}; for small base fields iterate small set.
 
     Returns a list of dicts {R.gen(i): value} representing solutions.
     """
@@ -194,22 +215,34 @@ def solve_shape_lex_branch(R, variables, G_lex, F, log=None,
     gens = R.gens()
     name_to_var = {str(gens[i]): gens[i] for i in range(n)}
 
-    # (1) Find or force a univariate in the last variable
     v_last = name_to_var[variables[-1]]
+    # Prefer a univariate already present
     univariates = [g for g in G_lex if set(map(str, g.variables())) <= {variables[-1]}]
-    if not univariates:
-        # Force via elimination ideal: eliminate all variables except the last.
-        El = R.ideal(G_lex).elimination_ideal(gens[:-1])
-        univariates = [g for g in El.gens() if set(map(str, g.variables())) <= {variables[-1]}]
-    if not univariates:
-        log_and_print("No univariate eliminant in last variable; branch solver not applicable.", log)
-        return []
 
-    g_last = max(univariates, key=lambda g: g.degree(v_last))
-    roots_last = roots_over_field_univariate(g_last, v_last, R, F)
-    log_and_print(f"Eliminant in {variables[-1]} has {len(roots_last)} root(s): {roots_last}", log)
+    roots_last = None
+    if univariates:
+        g_last = max(univariates, key=lambda g: g.degree(v_last))
+        roots_last = roots_over_field_univariate(g_last, v_last, R, F)
+        log_and_print(f"Eliminant in {variables[-1]} has {len(roots_last)} root(s): {roots_last}", log)
+    elif allow_elimination:
+        log_and_print("No univariate in last variable; attempting elimination ideal (may be heavy)...", log)
+        try:
+            El = R.ideal(G_lex).elimination_ideal(gens[:-1])
+            cand = [g for g in El.gens() if set(map(str, g.variables())) <= {variables[-1]}]
+            if cand:
+                g_last = max(cand, key=lambda g: g.degree(v_last))
+                roots_last = roots_over_field_univariate(g_last, v_last, R, F)
+                log_and_print(f"[elim] Eliminant in {variables[-1]} has {len(roots_last)} root(s): {roots_last}", log)
+        except Exception as e:
+            log_and_print(f"[elim] Elimination failed ({e}); falling back to brute-force over base field.", log)
 
-    # (2) Choose one representative polynomial per leading variable (cheap guidance)
+    if roots_last is None:
+        # Cheap & robust fallback: try all values in the base field
+        # (for GF(2) this is just {0,1})
+        roots_last = list(F)
+        log_and_print(f"No univariate eliminant available. Trying all {len(roots_last)} value(s) in GF({F.order()}) for {variables[-1]}.", log)
+
+    # Representative polynomial per leading variable (guidance)
     lead_poly = {}
     for g in G_lex:
         lm = g.lm()
@@ -220,11 +253,7 @@ def solve_shape_lex_branch(R, variables, G_lex, F, log=None,
 
     # Pruning: if any g becomes a nonzero constant under current partial assignment → dead branch
     def prunable(assign_dict):
-        """
-        Return True if any g ∈ G_lex becomes a nonzero constant under 'assign_dict'.
-        Works for both polynomial results and base-field scalars (GF(p) elements).
-        """
-        F = R.base_ring()
+        Fbase = R.base_ring()
         for g in G_lex:
             h = g.subs(assign_dict)
             # Polynomial case
@@ -232,11 +261,10 @@ def solve_shape_lex_branch(R, variables, G_lex, F, log=None,
                 if h.is_constant() and h != 0:
                     return True
             else:
-                # Scalar in base field (or Python int) → treat as constant
+                # Base-field scalar (or python int)
                 if h != 0:
                     return True
         return False
-
 
     solutions = []
     nodes = 0
@@ -268,15 +296,15 @@ def solve_shape_lex_branch(R, variables, G_lex, F, log=None,
             vk_name = variables[k]
             vk = name_to_var[vk_name]
 
-            # Prefer a polynomial whose LM is vk (degree 1 ideally in strict shape)
+            # Prefer a polynomial whose LM is vk
             poly = lead_poly.get(vk_name, None)
             if poly is None:
                 # Fallback: any polynomial that (still) involves vk
                 cands = [g for g in G_lex if vk in g.variables()]
                 if not cands:
-                    # No constraint observed → in GF(2) both values are viable
-                    cand_vals = [F(0), F(1)] if F.order() == 2 else [F(0)]
-                    for val in cand_vals:
+                    # No visible constraint → iterate small value set
+                    vals = list(F) if F.order() <= 3 else [F(0), F(1)]
+                    for val in vals:
                         nxt = dict(assign); nxt[vk] = val
                         if not prunable(nxt):
                             stack.append((k-1, nxt))
@@ -304,13 +332,8 @@ def solve_shape_lex_branch(R, variables, G_lex, F, log=None,
             try:
                 fk = to_true_univariate(pk, vk, R, F)
             except (TypeError, ValueError):
-                # Not univariate: in GF(2) brute-force two values; otherwise try fk.roots if single-var
-                if F.order() == 2:
-                    cand_vals = [F(0), F(1)]
-                else:
-                    # As a conservative fallback, try both 0 and 1 anyway (cheap in practice),
-                    # since we only ever target GF(2) in your pipeline. Keep generic code:
-                    cand_vals = [a for a in []]  # no-op, will set below
+                # Not univariate: iterate small set
+                cand_vals = list(F) if F.order() <= 3 else [F(0), F(1)]
             else:
                 if fk.degree() == 1:
                     L = fk.list()
@@ -319,17 +342,12 @@ def solve_shape_lex_branch(R, variables, G_lex, F, log=None,
                     if a != 0:
                         cand_vals = [(-b)/a]
                     else:
-                        # Degenerate linear -> use root finder
                         cand_vals = [a for (a, _) in fk.roots(multiplicities=True, ring=F)]
                 else:
                     cand_vals = [a for (a, _) in fk.roots(multiplicities=True, ring=F)]
 
-            # Final fallback if we didn't get values (shouldn't trigger for GF(2))
             if not cand_vals:
-                if F.order() == 2:
-                    cand_vals = [F(0), F(1)]
-                else:
-                    cand_vals = []
+                cand_vals = list(F) if F.order() <= 3 else [F(0), F(1)]
 
             for val in cand_vals:
                 nxt = dict(assign); nxt[vk] = val
@@ -374,7 +392,8 @@ def main():
     # ---- Args
     if len(sys.argv) < 2:
         print("Usage: sage scripts/extract_solutions_from_lex.sage results/<stem>_LEX.txt "
-              "[--first-only] [--max-solutions N] [--node-limit N] [--no-fallback]")
+              "[--first-only] [--max-solutions N] [--node-limit N] "
+              "[--no-fallback] [--check-dim] [--elim]")
         sys.exit(1)
 
     # Positional
@@ -388,29 +407,26 @@ def main():
     max_solutions = None
     node_limit    = 10_000_000
     no_fallback   = False
+    check_dim     = False          # OFF by default (prevents stdhilb overflow)
+    allow_elim    = False          # OFF by default (avoid heavy elimination GB)
 
     i = 2
     while i < len(sys.argv):
         a = sys.argv[i]
         if a == "--first-only":
-            first_only = True
-            i += 1
+            first_only = True; i += 1
         elif a.startswith("--max-solutions"):
-            # allow "--max-solutions 20" or "--max-solutions=20"
-            if "=" in a:
-                max_solutions = int(a.split("=",1)[1])
-                i += 1
-            else:
-                max_solutions = int(sys.argv[i+1]); i += 2
+            if "=" in a:  max_solutions = int(a.split("=",1)[1]); i += 1
+            else:         max_solutions = int(sys.argv[i+1]); i += 2
         elif a.startswith("--node-limit"):
-            if "=" in a:
-                node_limit = int(a.split("=",1)[1])
-                i += 1
-            else:
-                node_limit = int(sys.argv[i+1]); i += 2
+            if "=" in a:  node_limit = int(a.split("=",1)[1]); i += 1
+            else:         node_limit = int(sys.argv[i+1]); i += 2
         elif a == "--no-fallback":
-            no_fallback = True
-            i += 1
+            no_fallback = True; i += 1
+        elif a == "--check-dim":
+            check_dim = True; i += 1
+        elif a == "--elim":
+            allow_elim = True; i += 1
         else:
             print(f"Unrecognized argument: {a}")
             sys.exit(3)
@@ -435,13 +451,15 @@ def main():
 
         try:
             # ---- Parse input
-            variables, p, order, polys_str, shape_hdr = read_lex_basis_file(lex_file)
+            variables, p, order, polys_str, shape_hdr, zerodim_hdr = read_lex_basis_file(lex_file)
             log_and_print(f"Variables: {variables}", log)
             log_and_print(f"Field:     GF({p})", log)
             log_and_print(f"Order:     {order}", log)
             log_and_print(f"Basis size: {len(polys_str)}", log)
             if shape_hdr is not None:
                 log_and_print(f"Header says shape position: {shape_hdr}", log)
+            if zerodim_hdr is not None:
+                log_and_print(f"Header says zero-dimensional: {zerodim_hdr}", log)
 
             # ---- Build LEX ring/ideal
             F = GF(p)
@@ -451,11 +469,15 @@ def main():
             gens = R.gens()
             name_to_var = {str(gens[i]): gens[i] for i in range(len(gens))}
 
-            # ---- Sanity: zero-dimensionality
-            dim = I_lex.dimension()
-            log_and_print(f"Krull dimension: {dim}", log)
-            if dim != 0:
-                log_and_print("WARNING: Ideal is not zero-dimensional; extraction may be incomplete.", log)
+            # ---- (Optional) zero-dimensionality check (OFF by default for scale)
+            if check_dim:
+                try:
+                    dim = I_lex.dimension()
+                    log_and_print(f"Krull dimension (requested): {dim}", log)
+                except Exception as e:
+                    log_and_print(f"[WARN] dimension() failed with: {e}. Proceeding without it.", log)
+            else:
+                log_and_print("Skipping dimension() (default). Use --check-dim to force it (may be slow/unstable).", log)
 
             # ---- Heuristic shape info
             in_shape = lex_shape_position(variables, G_lex)
@@ -465,25 +487,29 @@ def main():
             t0 = time.time()
             solutions = solve_shape_lex_branch(
                 R, variables, G_lex, F, log=log,
+                allow_elimination=allow_elim,
                 first_only=first_only, max_solutions=max_solutions, max_nodes=node_limit
             )
             t1 = time.time()
             log_and_print(f"Branching triangular solver produced {len(solutions)} solution(s) in {t1 - t0:.6f} s.", log)
 
-            # ---- Optional fallback: variety enumeration (small systems only)
+            # ---- Optional fallback: full enumeration (SMALL systems only)
             if not solutions and not no_fallback:
-                log_and_print("Falling back to I_lex.variety(GF(p)) enumeration...", log)
-                t1 = time.time()
-                sols_dicts = I_lex.variety(F)
-                t2 = time.time()
-                log_and_print(f"variety(GF({p})) returned {len(sols_dicts)} solution(s) in {t2 - t1:.6f} s.", log)
-                solutions = []
-                for d in sols_dicts:
-                    sol = {}
-                    for vname in variables:
-                        rv = name_to_var[vname]
-                        sol[rv] = d[rv]
-                    solutions.append(sol)
+                if len(variables) <= 16:
+                    log_and_print("Falling back to I_lex.variety(GF(p)) enumeration (n ≤ 16)...", log)
+                    t1 = time.time()
+                    sols_dicts = I_lex.variety(F)
+                    t2 = time.time()
+                    log_and_print(f"variety(GF({p})) returned {len(sols_dicts)} solution(s) in {t2 - t1:.6f} s.", log)
+                    solutions = []
+                    for d in sols_dicts:
+                        sol = {}
+                        for vname in variables:
+                            rv = name_to_var[vname]
+                            sol[rv] = d[rv]
+                        solutions.append(sol)
+                else:
+                    log_and_print("No solutions from branching solver; skipping variety() (n is large). Use --no-fallback to silence.", log)
             elif not solutions and no_fallback:
                 log_and_print("No solutions found by branching solver; fallback disabled (--no-fallback).", log)
 
