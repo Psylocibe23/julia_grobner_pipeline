@@ -3,8 +3,8 @@
 #SBATCH --qos=tesi_spreafichi
 #SBATCH --partition=turing-wide
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=24
-#SBATCH --mem=256G
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=98G
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
