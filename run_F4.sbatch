@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=gb_F4
 #SBATCH --qos=tesi_spreafichi
-#SBATCH --partition=turing-wide
 #SBATCH --ntasks=1
+#SBATCH --partition=turing-wide,Main,lovelace
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=98G
+#SBATCH --mem=512G
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
