@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=emit_pcico
-#SBATCH --time=00:15:00
+#SBATCH --time=00:30:00
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=2G
+#SBATCH --mem=16G
 #SBATCH --output=logs/slurm/%x_%j.out
 #SBATCH --error=logs/slurm/%x_%j.err
 # (optional) #SBATCH --partition=cpu
