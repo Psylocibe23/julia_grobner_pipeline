@@ -3,9 +3,9 @@
 #SBATCH --qos=tesi_spreafichi
 #SBATCH --ntasks=1
 #SBATCH --partition=turing-wide,Main,lovelace
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=512G
-#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=128G
+#SBATCH --time=06:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
