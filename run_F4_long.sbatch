@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=gb_F4_long
 #SBATCH --qos=tesi_spreafichi
-#SBATCH --ntasks=1
 #SBATCH --partition=turing-wide,Main,lovelace
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=512G
 #SBATCH --time=24:00:00
@@ -10,24 +10,19 @@
 #SBATCH --error=logs/%x_%j.err
 
 set -euo pipefail
-
-# Ensure these exist
 mkdir -p logs results
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: sbatch run_F4.sbatch <input_file.in> [threads]"
+  echo "Usage: sbatch run_F4_long.sbatch <input_file.in> [threads]"
   exit 1
 fi
 
 INPUT_FILE="$1"
 THREADS="${2:-${SLURM_CPUS_PER_TASK:-8}}"
 
-if [[ ! -f "$INPUT_FILE" ]]; then
-  echo "Input file not found: $INPUT_FILE"
-  exit 2
-fi
+[[ -f "$INPUT_FILE" ]] || { echo "Input not found: $INPUT_FILE"; exit 2; }
 
-# Keep math libs from oversubscribing; give Julia threads
+# Avoid oversubscription from math libs
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -39,7 +34,7 @@ echo "[$(date)] CWD: $(pwd)"
 echo "[$(date)] Input: $INPUT_FILE"
 echo "[$(date)] Threads: $THREADS"
 
-# Make 'module' available in non-login shells, then load Julia
+# Load Julia
 if ! type module >/dev/null 2>&1; then
   [[ -f /etc/profile ]] && source /etc/profile
   [[ -f /etc/profile.d/modules.sh ]] && source /etc/profile.d/modules.sh
@@ -48,10 +43,15 @@ module load julia
 
 which julia
 julia -v
-julia -e 'println("Julia smoke test ok; Threads=", Threads.nthreads())'
+julia -e 'println("Julia ok; Threads=", Threads.nthreads())'
 
-# Run the solver (writes logs/<...>.log and results/<...>.txt)
-julia scripts/solve_F4_from_file.jl "$INPUT_FILE" "$THREADS"
+# Optional: use local depot/project to reduce network pressure (uncomment if helpful)
+# export JULIA_DEPOT_PATH="$PWD/.julia_depot"
+# export JULIA_PROJECT="$PWD"
+# julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+# Run
+julia scripts/solve_F4_from_file_parsing.jl "$INPUT_FILE" "$THREADS"
 
 echo "[$(date)] Listing results/:"
 ls -lh results || true
