@@ -264,13 +264,12 @@ def main():
                 # varpow: dict str(var) -> int
                 if not varpow:
                     return R(1)
-                # Build monomial via product of generators**exp
                 gdict = R.gens_dict()
                 m = R(1)
                 for vname, e in varpow.items():
                     m *= gdict[vname]**e
                 return m
-
+            
             def parse_poly_streaming(txt, R):
                 """
                 Robust non-recursive parser for lines like:
@@ -280,10 +279,13 @@ def main():
                 """
                 p = R.characteristic()
                 gdict = R.gens_dict()
-                # Normalize unary minus by turning "-" into "+-" and split on "+"
+            
+                # Normalize unary minus at term boundaries: turn "-" into "+-"
                 s = txt.replace(" -", "+-").replace("-", "+-")
-                if s.startswith("+-"): s = "-" + s[2:]
-                terms = [t for t in s.split("+") if t.strip() != ""]
+                if s.startswith("+-"):
+                    s = "-" + s[2:]
+                terms = [t for t in s.split("+") if t.strip()]
+            
                 acc = {}
                 for t in terms:
                     t = t.strip()
@@ -291,21 +293,20 @@ def main():
                     if t.startswith("-"):
                         sign = -1
                         t = t[1:].strip()
-                    if t == "":
+                    if not t:
                         continue
+            
                     coef = 1
                     varpow = {}   # var -> exp
-                    # split by '*'
+            
                     for factor in t.split("*"):
                         f = factor.strip()
-                        if f == "":
+                        if not f:
                             continue
                         if f.isdigit():
-                            # numeric coefficient
                             coef = (coef * (int(f) % p)) % p
                             continue
-                        # maybe "-123" appears inside a term (unlikely after our split), handle:
-                        if (f.startswith("-") and f[1:].isdigit()):
+                        if f.startswith("-") and f[1:].isdigit():
                             coef = (coef * ((-int(f[1:])) % p)) % p
                             continue
                         # variable or var^exp
@@ -319,32 +320,32 @@ def main():
                         if vname not in gdict:
                             raise ValueError(f"Unknown variable '{vname}' while parsing.")
                         varpow[vname] = varpow.get(vname, 0) + e
-                    # reduce coefficient mod p
+            
+                    # reduce and apply sign
                     coef %= p
+                    if sign < 0 and coef != 0:
+                        coef = (p - coef) % p  # multiply by -1 mod p
+            
                     if coef == 0:
                         continue
-                    # accumulate: use tuple(sorted(varpow.items())) as key
+            
                     key = tuple(sorted(varpow.items()))
                     acc[key] = (acc.get(key, 0) + coef) % p
                     if acc[key] == 0:
                         del acc[key]
-
-                # Build polynomial from accumulated terms
+            
                 poly = R(0)
                 for key, c in acc.items():
-                    varpow = dict(key)
-                    poly += R(c) * _mk_monom(R, varpow)
+                    poly += R(c) * _mk_monom(R, dict(key))
                 return poly
-
+            
             def parse_poly_safe(txt, R):
-                # Fast, robust path first: streaming parser
                 try:
                     return parse_poly_streaming(txt, R)
                 except Exception:
                     pass
-                # Fallbacks (rarely needed):
                 try:
-                    return R(txt)  # Sage parser (may recurse)
+                    return R(txt)  # Sage parser
                 except Exception:
                     pass
                 try:
@@ -358,7 +359,7 @@ def main():
                     return R(sp)
                 except Exception as e:
                     raise RuntimeError(f"Failed to parse polynomial: {e}")
-
+            
 
             G_drl = [parse_poly_safe(s, R_drl) for s in polys_str]
 
