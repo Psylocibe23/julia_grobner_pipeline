@@ -261,7 +261,7 @@ open(log_file, "w") do logio
             try
                 # info_level=2 provides mid-level verbosity inside the F4 engine;
                 # nr_thrds engages parallel linear algebra where available.
-                @time G = groebner_basis(I; initial_hts = 21, nr_thrds = nthreads, max_nr_pairs = 50000, la_option=44, complete_reduction = false, info_level = 2)
+                @time G = groebner_basis(I; nr_thrds = nthreads, info_level = 2)
             catch err
                 println("\nF4 computation FAILED with error:\n$err")
                 # The stack trace will also be in the log due to redirection.
