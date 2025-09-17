@@ -260,33 +260,105 @@ def main():
             # Build rings and ideals
             R_drl = PolynomialRing(GF(p), variables, order='degrevlex')
             R_lex = PolynomialRing(GF(p), variables, order='lex')
+            def _mk_monom(R, varpow):
+                # varpow: dict str(var) -> int
+                if not varpow:
+                    return R(1)
+                # Build monomial via product of generators**exp
+                gdict = R.gens_dict()
+                m = R(1)
+                for vname, e in varpow.items():
+                    m *= gdict[vname]**e
+                return m
+
+            def parse_poly_streaming(txt, R):
+                """
+                Robust non-recursive parser for lines like:
+                  "924*Y0000^2*S0700^2*... - 924*Y0000*... + 231*..."
+                Supported: +, -, *, ^, integers (coeffs), variable names from R.
+                No parentheses, no division.
+                """
+                p = R.characteristic()
+                gdict = R.gens_dict()
+                # Normalize unary minus by turning "-" into "+-" and split on "+"
+                s = txt.replace(" -", "+-").replace("-", "+-")
+                if s.startswith("+-"): s = "-" + s[2:]
+                terms = [t for t in s.split("+") if t.strip() != ""]
+                acc = {}
+                for t in terms:
+                    t = t.strip()
+                    sign = 1
+                    if t.startswith("-"):
+                        sign = -1
+                        t = t[1:].strip()
+                    if t == "":
+                        continue
+                    coef = 1
+                    varpow = {}   # var -> exp
+                    # split by '*'
+                    for factor in t.split("*"):
+                        f = factor.strip()
+                        if f == "":
+                            continue
+                        if f.isdigit():
+                            # numeric coefficient
+                            coef = (coef * (int(f) % p)) % p
+                            continue
+                        # maybe "-123" appears inside a term (unlikely after our split), handle:
+                        if (f.startswith("-") and f[1:].isdigit()):
+                            coef = (coef * ((-int(f[1:])) % p)) % p
+                            continue
+                        # variable or var^exp
+                        if "^" in f:
+                            vname, expstr = f.split("^", 1)
+                            vname = vname.strip()
+                            e = int(expstr.strip())
+                        else:
+                            vname = f.strip()
+                            e = 1
+                        if vname not in gdict:
+                            raise ValueError(f"Unknown variable '{vname}' while parsing.")
+                        varpow[vname] = varpow.get(vname, 0) + e
+                    # reduce coefficient mod p
+                    coef %= p
+                    if coef == 0:
+                        continue
+                    # accumulate: use tuple(sorted(varpow.items())) as key
+                    key = tuple(sorted(varpow.items()))
+                    acc[key] = (acc.get(key, 0) + coef) % p
+                    if acc[key] == 0:
+                        del acc[key]
+
+                # Build polynomial from accumulated terms
+                poly = R(0)
+                for key, c in acc.items():
+                    varpow = dict(key)
+                    poly += R(c) * _mk_monom(R, varpow)
+                return poly
+
             def parse_poly_safe(txt, R):
-                # 1) fast path
+                # Fast, robust path first: streaming parser
                 try:
-                    return R(txt)
-                except RecursionError:
-                    pass
-                except Exception:
-                    # keep trying below
-                    pass
-
-                # 2) sage_eval with mapped generators
-                try:
-                    return sage_eval(txt, locals=R.gens_dict(), locals_fallback=False)
-                except RecursionError:
-                    pass
+                    return parse_poly_streaming(txt, R)
                 except Exception:
                     pass
-
-                # 3) Singular parser in the correct ring, then coerce back
+                # Fallbacks (rarely needed):
                 try:
-                    # Switch Singular to the same ring as R
+                    return R(txt)  # Sage parser (may recurse)
+                except Exception:
+                    pass
+                try:
+                    return sage_eval(txt, locals=R.gens_dict())
+                except Exception:
+                    pass
+                try:
                     singular.setring(R._singular_())
                     singular.eval('poly __tmp__ = ' + txt + ';')
-                    sp = singular('__tmp__')    # Singular polynomial
-                    return R(sp)                # coerce back to Sage polynomial
+                    sp = singular('__tmp__')
+                    return R(sp)
                 except Exception as e:
-                    raise RuntimeError(f"Failed to parse polynomial via all methods: {e}")
+                    raise RuntimeError(f"Failed to parse polynomial: {e}")
+
 
             G_drl = [parse_poly_safe(s, R_drl) for s in polys_str]
 
