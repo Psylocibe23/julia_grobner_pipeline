@@ -17,24 +17,13 @@
 # USAGE
 #   sage scripts/test_hfe_solution_validity.sage <in_file> <solutions_file> [log_file]
 #        [--secret v0,v1,...,v{n-1}] [--rank]
-#
-# SOLUTIONS FORMAT
-#   One solution per line, dict-like, e.g.:
-#       {x0: 0, x1: 1, x2: 0, x3: 1}
-#   Keys may be quoted or not; values must be 0/1 (GF(2)).
 ###############################################################################
 
 import sys, re, ast
 from sage.all import GF, PolynomialRing, Matrix, vector, matrix
 
-# -----------------------------------------------------------------------------
-# (0) Small helpers
-# -----------------------------------------------------------------------------
+# ================ Ytils ================
 def _strip_labels_and_brackets(line):
-    """
-    Remove an optional 'name =' label and surrounding () or [] brackets.
-    Turn e.g. 'b_S = (1, 0, 1)' into '1, 0, 1'.
-    """
     s = line.strip()
     if "=" in s:
         s = s.split("=", 1)[1].strip()
@@ -44,14 +33,12 @@ def _parse_int_list(s):
     """Parse comma/space separated integers from string s."""
     return [int(t) for t in re.split(r"[,\s]+", s) if t != ""]
 
-# -----------------------------------------------------------------------------
-# (1) Parse pipeline .in file
-# -----------------------------------------------------------------------------
+# ================ Parse .in file ================
 def parse_in_file(infile):
     """
     Returns:
         var_names: list[str]
-        F: GF(p) (we expect p=2)
+        F: GF(p) 
         R: polynomial ring GF(p)[x...]
         public_polys: list of R-polynomials (length n)
         field_polys: list of R-polynomials (length n) or None
@@ -101,14 +88,8 @@ def parse_in_file(infile):
 
     return var_names, F, R, public_polys, field_polys
 
-# -----------------------------------------------------------------------------
-# (2) Parse solutions file
-# -----------------------------------------------------------------------------
+# ================ Parse solutions file ================
 def parse_solutions_file(solfile):
-    """
-    Parse lines like '{x0: 0, x1: 1, ...}' into dicts.
-    Accepts optional quotes; ignores other non-solution lines.
-    """
     sols = []
     with open(solfile) as f:
         for line in f:
@@ -126,9 +107,6 @@ def parse_solutions_file(solfile):
             sols.append(sol)
     return sols
 
-# -----------------------------------------------------------------------------
-# (3) Solution key sanity
-# -----------------------------------------------------------------------------
 def check_solution_keys(var_names, sol_dict):
     """Return (missing_keys, extra_keys) wrt the expected variable names."""
     ks = set(sol_dict.keys())
@@ -137,37 +115,25 @@ def check_solution_keys(var_names, sol_dict):
     extra   = sorted(ks - need)
     return missing, extra
 
-# -----------------------------------------------------------------------------
-# (4) Evaluate equations at a candidate solution (ordered by var_names)
-# -----------------------------------------------------------------------------
+# ================ Evaluate equations at candidate solution ================
 def eval_polys(polys, R, var_names, sol_dict):
     """
-    Evaluate each polynomial at the point specified by sol_dict,
-    interpreting values in the ring's base field. Returns list[bool].
+    Evaluate each polynomial at the point specified by sol_dict
+    Returns list[bool]
     """
     F = R.base_ring()
     vals = tuple(F(int(sol_dict[name])) for name in var_names)  # KeyError -> loud
     return [p(*vals) == 0 for p in polys]
 
-# -----------------------------------------------------------------------------
-# (5) Parse generator/secret log to recover secret and S (and optionally T)
-# -----------------------------------------------------------------------------
+# ================ Parse log/gen file ================
 def load_secret_and_maps_from_log(logfile):
     """
     Attempt to recover from the log:
-        secret_vector : list[int] or None
-        A_S : Matrix(GF(2)) or None
-        b_S : vector(GF(2)) or None
-        A_T : Matrix(GF(2)) or None (optional)
-        b_T : vector(GF(2)) or None (optional)
-
-    Supported formats:
-      • "Secret: [1,0,1,...]"  or  "Secret = [ ... ]" (also matches "Secret x* = [...]").
-      • "A_S =" block (matrix) followed by a line for b_S (with or without "b_S =").
-      • "A_T =" block (matrix) followed by a line for b_T (with or without "b_T =").
-      • older logs: "Affine input map S(x) = A_S x + b_S:" followed by matrix + vector.
-                    (Analogous for T if present.)
-
+        secret_vector: list[int] or None
+        A_S: Matrix(GF(2)) or None
+        b_S: vector(GF(2)) or None
+        A_T: Matrix(GF(2)) or None 
+        b_T: vector(GF(2)) or None 
     Returns (secret_vector, A_S, b_S, A_T, b_T).
     """
     txt = open(logfile, "r").read()
@@ -180,8 +146,6 @@ def load_secret_and_maps_from_log(logfile):
         secret = _parse_int_list(m.group(1).strip())
 
     # Helper: parse a Sage-style matrix block:
-    # [1 0 1]
-    # [0 1 1]
     def parse_matrix_block(lines, start):
         rows = []
         i = start
@@ -218,7 +182,7 @@ def load_secret_and_maps_from_log(logfile):
                     b_T = vector(GF(2), _parse_int_list(b_line))
             break
 
-    # Pattern 2 (older logs) for S only
+    # Pattern 2 for S only
     if A_S is None:
         for i, ln in enumerate(lines):
             if "Affine input map S(x)" in ln and "A_S" in ln and "b_S" in ln:
@@ -234,9 +198,7 @@ def load_secret_and_maps_from_log(logfile):
 
     return secret, A_S, b_S, A_T, b_T
 
-# -----------------------------------------------------------------------------
-# (6) S-equivalence test
-# -----------------------------------------------------------------------------
+# ================ S equivalence test ================
 def S_equivalent(var_names, sol_dict, secret_vector, A_S, b_S):
     """
     Return True iff A_S * sol + b_S == A_S * secret + b_S over GF(2).
@@ -246,12 +208,10 @@ def S_equivalent(var_names, sol_dict, secret_vector, A_S, b_S):
     x_sec = vector(F2, [F2(int(b))          for b in secret_vector])
     return (A_S * x_sol + b_S) == (A_S * x_sec + b_S)
 
-# -----------------------------------------------------------------------------
-# (7) Optional: Jacobian rank at a point
-# -----------------------------------------------------------------------------
+# ================ Jacobian rank ================
 def jacobian_rank_at_point(polys, R, var_names, sol_dict):
     """
-    Compute rank over GF(p) of the Jacobian of `polys` at the point defined by sol_dict.
+    Compute rank over GF(p) of the Jacobian of polys at the point defined by sol_dict
     """
     F = R.base_ring()
     x = R.gens()
@@ -259,9 +219,7 @@ def jacobian_rank_at_point(polys, R, var_names, sol_dict):
     J = matrix(F, [[p.derivative(xj)(*vals) for xj in x] for p in polys])
     return J.rank()
 
-# -----------------------------------------------------------------------------
-# (8) CLI and main routine
-# -----------------------------------------------------------------------------
+# ================ Main ================
 def main():
     if len(sys.argv) < 3:
         print("Usage: sage scripts/test_hfe_solution_validity.sage <in_file> <solutions_file> [log_file] "
@@ -271,7 +229,6 @@ def main():
     in_file   = sys.argv[1]
     sols_file = sys.argv[2]
 
-    # Optional: logfile (third positional if not a flag)
     logfile = None
     args = sys.argv[3:]
     if args and not args[0].startswith("-"):
@@ -300,7 +257,7 @@ def main():
     # Load solutions
     solutions = parse_solutions_file(sols_file)
 
-    # Optional: load secret and maps from log
+    # load secret and maps from log
     secret = A_S = b_S = A_T = b_T = None
     if logfile:
         try:
@@ -316,10 +273,10 @@ def main():
     print("==============================================================")
     print(" HFE SOLUTION VALIDITY CHECK")
     print("==============================================================")
-    print(f"System:         {in_file}")
+    print(f"System: {in_file}")
     print(f"Solutions file: {sols_file}")
     if logfile:
-        print(f"Log file:       {logfile}")
+        print(f"Log file: {logfile}")
         print("Parsed from log — "
               f"secret: {'yes' if secret is not None else 'no'}, "
               f"A_S: {'yes' if A_S is not None else 'no'}, "
@@ -337,24 +294,24 @@ def main():
         # Key sanity
         missing, extra = check_solution_keys(var_names, sol)
         if missing:
-            print(f"  [warn] solution missing vars: {missing}")
+            print(f"[warn] solution missing vars: {missing}")
         if extra:
-            print(f"  [warn] solution has extra keys (ignored): {extra}")
+            print(f"[warn] solution has extra keys (ignored): {extra}")
 
         # Public equations
         ok_pub = eval_polys(public_polys, R, var_names, sol)
-        print(f"  Satisfies public equations? {'YES' if all(ok_pub) else 'NO'}")
+        print(f"Satisfies public equations? {'YES' if all(ok_pub) else 'NO'}")
         if not all(ok_pub):
             bad = [k+1 for k,b in enumerate(ok_pub) if not b]
-            print(f"    Failing eq indices: {bad}")
+            print(f"Failing eq indices: {bad}")
 
         # Field equations (if present)
         if field_polys is not None:
             ok_field = eval_polys(field_polys, R, var_names, sol)
-            print(f"  Satisfies field equations x_i^2+x_i? {'YES' if all(ok_field) else 'NO'}")
+            print(f"Satisfies field equations x_i^2+x_i? {'YES' if all(ok_field) else 'NO'}")
             if not all(ok_field):
                 badf = [k+1 for k,b in enumerate(ok_field) if not b]
-                print(f"    Failing field eq indices: {badf}")
+                print(f"Failing field eq indices: {badf}")
         else:
             print("  Field equations not present (or not recognized) in .in — skipped.")
 
@@ -362,19 +319,19 @@ def main():
         if secret is not None:
             vals = [int(sol[v]) for v in var_names]
             is_secret = (vals == [int(b) for b in secret])
-            print(f"  Equals planted secret? {'YES' if is_secret else 'NO'}")
+            print(f"Equals planted secret? {'YES' if is_secret else 'NO'}")
         else:
-            print("  Secret not provided/found — equality test skipped.")
+            print("Secret not provided/found — equality test skipped.")
 
         # S-equivalence (if S, b_S, secret available)
         if secret is not None and A_S is not None and b_S is not None:
             try:
                 eqS = S_equivalent(var_names, sol, secret, A_S, b_S)
-                print(f"  S-equivalent to secret (A_S x + b_S)? {'YES' if eqS else 'NO'}")
+                print(f"S-equivalent to secret (A_S x + b_S)? {'YES' if eqS else 'NO'}")
             except Exception as e:
-                print(f"  S-equivalence check failed: {e}")
+                print(f"S-equivalence check failed: {e}")
         else:
-            print("  S-equivalence not checked (missing S or secret).")
+            print("S-equivalence not checked (missing S or secret).")
 
         # Optional Jacobian rank (public system only)
         if show_rank:
@@ -389,6 +346,6 @@ def main():
     print("--------------------------------------------------------------")
     print("Validation complete.")
 
-# Entry point
+
 if __name__ == "__main__":
     main()

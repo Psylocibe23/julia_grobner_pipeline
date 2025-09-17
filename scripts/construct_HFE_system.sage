@@ -8,7 +8,7 @@
 #   last n lines: field equations  x_i^2 + x_i
 #
 # CLASSICAL HFE (char 2):
-#   F(X) uses only exponents 2^i  (linearized) and 2^i+2^j with i<j (true HFE quad),
+#   F(X) uses only exponents 2^i (linearized) and 2^i+2^j with i<j (true HFE quad),
 #   subject to 2^i ≤ D and 2^i + 2^j ≤ D.
 #
 # LOGS:
@@ -16,13 +16,13 @@
 #       logs/HFE_n{n}_D{D}_genlog.txt
 #     includes the secret vector as well.
 #
-#   • NEW: Secret log (parse-friendly details for verification)
+#   • Secret log (parse-friendly details for verification)
 #       logs/HFE_n{n}_D{D}_secret.txt
 #     contains:
 #       Field: GF(2^n)
 #       Modulus polynomial: <irreducible poly over GF(2)>
 #       F(X) = <polynomial over GF(2^n)[X]>
-#       A_S =            # matrix block (one row per line)
+#       A_S = # matrix block (one row per line)
 #       [ ... ]
 #       b_S = ( ... )
 #       A_T =
@@ -35,7 +35,7 @@ import sys, os, time
 from random import random
 from sage.all import *
 
-# ---------- Utilities ---------------------------------------------------------
+# ============================ Utilities ======================================
 
 def ensure_dir_for(path):
     """Create parent directory for `path`, if needed."""
@@ -44,7 +44,7 @@ def ensure_dir_for(path):
         os.makedirs(d)
 
 def now_str():
-    """Wall-clock time string for user-facing messages."""
+    """Wall-clock time string for user."""
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
 def log_write(L, s):
@@ -52,15 +52,14 @@ def log_write(L, s):
     if L is not None:
         L.write(s + "\n"); L.flush()
 
-# ---------- HFE univariate over K = GF(2^n) ----------------------------------
+# ====================== HFE univariate over K = GF(2^n) ======================
 
 def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
                           must_have_quad=True, must_have_lin=True):
     """
-    Build F(X) ∈ K[X] with HFE-degree ≤ D using:
+    Build F(X) in K[X] with HFE-degree ≤ D using:
       • linearized terms: X^(2^i) when 2^i ≤ D;
       • TRUE quadratic terms: X^(2^i+2^j) with i<j and 2^i+2^j ≤ D.
-    (We exclude i=j because X^(2^i+2^i) = X^(2^{i+1}) in char 2 → linearized.)
     """
     R.<X> = PolynomialRing(K)
     F = R(0)
@@ -117,12 +116,12 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
 
     return F, have_quad, have_lin
 
-# ---------- Project K[x] → n coordinates in F2[x] ------------------------
+# ================= Project K[x] onto n coordinates in F2[x] ======
 
 def coords_over_F2(poly_Kx, K, a, n, R_F2):
     """
-    Given poly_Kx ∈ K[x0,...,x{n-1}], write coefficients in the power basis
-    {1,a,...,a^{n-1}} and return [g_0,...,g_{n-1}] with g_t ∈ F2[x]
+    Given poly_Kx in K[x0,...,x{n-1}], write coefficients in the power basis
+    {1,a,...,a^{n-1}} and return [g_0,...,g_{n-1}] with g_t in F2[x]
     """
     coords = [R_F2(0) for _ in range(n)]
     for mon, coeff in poly_Kx.dict().items():
@@ -136,7 +135,6 @@ def coords_over_F2(poly_Kx, K, a, n, R_F2):
 
 def boolean_reduce(poly, R):
     """
-    Correct Boolean reduction modulo <x_i^2 - x_i>:
     for each variable, any exponent e >= 1 collapses to 1.
     This keeps x^k = x for k>=1 and preserves quadratic products
     """
@@ -148,7 +146,7 @@ def boolean_reduce(poly, R):
         terms[red_mon] = terms.get(red_mon, R.base_ring()(0)) + coeff
     return R(terms)
 
-# ---------- Jacobian rank -----------------------------------------------------
+# ================= Jacobian rank ==========================
 
 def jacobian_rank_at(polys, R, x_star):
     """
@@ -163,7 +161,7 @@ def jacobian_rank_at(polys, R, x_star):
             J[i, j] = F2(dpoly.subs(subst))
     return J.rank()
 
-# ---------- Secret log writer -------------------------------------------------
+# ================= Secret log writer =========================
 
 def write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, secret_vec):
     """
@@ -188,7 +186,7 @@ def write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, secret_
         # Secret
         S.write("Secret = [" + ", ".join(str(int(b)) for b in secret_vec) + "]\n")
 
-# ---------- Builder: compute in K[x], then project to F2[x] -------------------
+# ================= Builder: compute in K[x], then project to F2[x] =================
 
 def build_and_export_instance(n, D, out_infile, seed=None,
                               prob_quad=0.70, prob_lin=0.60,
@@ -198,10 +196,10 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                               verbose=False):
     """
     Conditions:
-     (i) F has linearized and TRUE quadratic HFE terms (when admissible).
-    (ii) public system has degree ≥ 2 after Boolean reduction.
+     (i) F has linearized and TRUE quadratic HFE terms 
+    (ii) public system has degree ≥ 2 after Boolean reduction
    (iii) there exists x* with Jacobian rank ≥ rank_min (default n-1). If not found but
-         allow_fallback=True, accept the best-rank seen.
+         allow_fallback=True, accept the best-rank seen
 
     Writes:
       - .in file for the pipeline
@@ -234,8 +232,8 @@ def build_and_export_instance(n, D, out_infile, seed=None,
         names = tuple(f"x{i}" for i in range(n))
         R = PolynomialRing(F2, n, names=names)  # R = F2[x]
         XK = PolynomialRing(K, n, names=names)  # XK = K[x]
-        x_R  = R.gens()
-        x_K  = XK.gens()
+        x_R = R.gens()
+        x_K = XK.gens()
 
         # Draw F(X) in K[X]
         F_univar, have_quad, have_lin = random_hfe_polynomial(
@@ -270,13 +268,13 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                     expr += 1
                 s_vec_K.append(expr)
 
-            # Embed to K via the fixed basis: sK(x) = Σ s_k(x) a^k ∈ K[x]
+            # Embed to K via the fixed basis: sK(x) = sum_k s_k(x) a^k in K[x]
             sK = sum(s_vec_K[k] * (a**k) for k in range(n))
 
-            # Evaluate the HFE univariate: yK(x) = F( sK(x) ) ∈ K[x]
+            # Evaluate the HFE univariate: yK(x) = F( sK(x) ) in K[x]
             yK = F_univar(sK)
 
-            # Project K[x] → n polynomials over F2[x]
+            # Project K[x] to n polynomials over F2[x]
             y_vec_R = coords_over_F2(yK, K, a, n, R)
 
             # Apply output linear map (no constant yet): z0 = A_T * y
@@ -401,7 +399,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
         if L is not None:
             L.close()
 
-# ---------- MAIN ----------------------------------------------------------------
+# ================= MAIN ==================================
 
 def main():
     if len(sys.argv) < 3:

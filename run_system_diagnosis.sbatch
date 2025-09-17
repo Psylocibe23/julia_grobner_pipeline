@@ -10,7 +10,6 @@
 
 set -euo pipefail
 
-# Ensure logs dir exists (matches --output/--error paths)
 mkdir -p logs
 
 # Keep math libs from oversubscribing threads

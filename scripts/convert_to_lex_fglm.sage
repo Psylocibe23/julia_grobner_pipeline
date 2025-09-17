@@ -1,18 +1,14 @@
 ###############################################################################
-# convert_to_lex_fglm.sage  —  FGLM order change (DRL → LEX) with rich logging
+# convert_to_lex_fglm.sage  —  FGLM order change (DRL to LEX) with logging
 #
 # PURPOSE
-#   Given a Gröbner basis G in DRL (degrevlex) over GF(p) — typically produced
-#   by the F4 stage — convert it to a LEX Gröbner basis via the FGLM algorithm.
+#   Given a Gröbner basis G in DRL (degrevlex) over GF(p)
+#   convert it to a LEX Gröbner basis via the FGLM algorithm.
 #   Then (a) record useful statistics, (b) perform BOTH a heuristic and a strict
 #   shape-position check, and (c) write out a clean, machine-parseable LEX file.
 #
-# DESIGN CHOICES
-#   • Input:   Prime field GF(p); DRL basis (not necessarily reduced).
-#   • Output:  LEX basis; we also build an ideal from it (often triangular).
-#   • API:     Sage’s Ideal.transformed_basis('fglm', R_lex) as the canonical
-#              entry point for FGLM conversion (zero-dimensional precondition).
-#   • Robustness: Detailed logging and failure messages for common pitfalls.
+#   • Input: Prime field GF(p); DRL basis (not necessarily reduced)
+#   • Output: LEX basis
 #
 # INPUT FILE (as written by solve_F4_from_file.jl)
 #   # Groebner basis (F4) computed for <path>
@@ -26,12 +22,12 @@
 #   <poly_2>
 #   ...
 #
-# New CLI flags (all optional):
-#   --assume-zerodim          : skip Krull-dimension check (treat as 0-dim)
-#   --dim-timeout=SECONDS     : time budget for I_drl.dimension() (default 60)
-#   --fglm-timeout=SECONDS    : time budget for the FGLM call (default 0 = no cap)
+# CLI flags (all optional):
+#   --assume-zerodim  : skip Krull-dimension check (treat as 0-dim)
+#   --dim-timeout=SECONDS : time budget for I_drl.dimension() (default 60)
+#   --fglm-timeout=SECONDS : time budget for the FGLM call (default 0 = no cap)
 #   --reduce=never|auto|always: reduce the LEX basis (default auto)
-#   --reduce-timeout=SECONDS  : time budget for reduction (default 60 in auto/always)
+#   --reduce-timeout=SECONDS: time budget for reduction (default 60 in auto/always)
 #
 # Examples:
 #   sage scripts/convert_to_lex_fglm.sage results/HFE_n5_D6_F4_...txt \
@@ -42,7 +38,7 @@
 
 import sys, os, time, signal
 
-# ---------------- Utilities ----------------
+# ================= Utilities =================
 def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -76,7 +72,7 @@ def run_with_timeout(fn, seconds, on_timeout=None):
     else:
         return fn()
 
-# ---------------- Parsing the DRL-basis file ----------------
+# ================= Parsing the DRL-basis file =================
 def read_groebner_basis_file(result_file):
     variables, field_p, order = None, None, None
     basis_start = None
@@ -121,7 +117,7 @@ def read_groebner_basis_file(result_file):
 
     return variables, field_p, (order or "UNKNOWN"), polys
 
-# ---------------- Shape-position checks ----------------
+# ================= Shape-position checks =================
 def shape_heuristic(variables, G_lex):
     try:
         G_sorted = sorted(G_lex, key=lambda g: g.lm(), reverse=True)
@@ -161,9 +157,9 @@ def shape_strict(variables, G_lex):
             return False
     return True
 
-# ---------------- Main ----------------
+# ================= Main =================
 def main():
-    from sage.all import GF, PolynomialRing  # lazy import so script starts quickly
+    from sage.all import GF, PolynomialRing  
 
     if len(sys.argv) < 2:
         print("Usage: sage scripts/convert_to_lex_fglm.sage <F4_result.txt> [--assume-zerodim] "
@@ -175,8 +171,8 @@ def main():
     # defaults
     assume_zerodim = False
     dim_timeout = 60
-    fglm_timeout = 0          # 0 == unlimited
-    reduce_mode = "auto"      # never|auto|always
+    fglm_timeout = 0  # 0 == unlimited
+    reduce_mode = "auto"  # never|auto|always
     reduce_timeout = 60
 
     # parse flags
@@ -195,26 +191,26 @@ def main():
             print(f"Unknown flag '{a}'"); sys.exit(2)
 
     results_dir = "results"
-    logs_dir    = "logs"
+    logs_dir = "logs"
     ensure_dir(results_dir); ensure_dir(logs_dir)
 
-    base_name   = stem_of(result_file)
+    base_name = stem_of(result_file)
     lex_outfile = os.path.join(results_dir, base_name + "_LEX.txt")
-    log_outfile = os.path.join(logs_dir,    base_name + "_FGLM.log")
+    log_outfile = os.path.join(logs_dir, base_name + "_FGLM.log")
 
     with open(log_outfile, "w") as log:
         log_and_print("==============================================================", log)
         log_and_print(" FGLM CONVERSION — DRL → LEX (Sage/Singular backend)", log)
         log_and_print("==============================================================", log)
-        log_and_print(f"Input file:  {result_file}", log)
-        log_and_print(f"LEX out:     {lex_outfile}", log)
+        log_and_print(f"Input file: {result_file}", log)
+        log_and_print(f"LEX out: {lex_outfile}", log)
         log_and_print("--------------------------------------------------------------", log)
 
         try:
             log_and_print("Parsing input (headers and DRL basis)...", log)
             variables, p, in_order, polys_str = read_groebner_basis_file(result_file)
             log_and_print(f"Variables: {variables}", log)
-            log_and_print(f"Field:     GF({p})", log)
+            log_and_print(f"Field: GF({p})", log)
             log_and_print(f"Order(in): {in_order}", log)
             log_and_print(f"Basis size (input): {len(polys_str)}", log)
 
@@ -267,7 +263,7 @@ def main():
             t1 = time.time()
             log_and_print(f"FGLM wall time: {t1 - t0:.3f} s", log)
 
-            # Reduce?
+            # Reduce
             reduce_mode_norm = reduce_mode.lower()
             log_and_print(f"Post-processing LEX basis (reduce={reduce_mode_norm}, timeout={reduce_timeout}s)...", log)
             if reduce_mode_norm == "never":

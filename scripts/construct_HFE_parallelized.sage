@@ -1,20 +1,10 @@
 ###############################################################################
 # construct_HFE_parallelized.sage — Classical HFE instance generator for GF(2)
 #
-# - True HFE: F(X) uses only exponents 2^i and 2^i+2^j (i<j), ≤ D
-# - Outputs pipeline .in, a human log, and a secret log (F,S,T,secret)
-# - Speedups:
-#     • Build public system directly in F2[x] via Frobenius (no K[x] blow-up)
-#     • Precompute ∂p_i/∂x_j once per (S,T)
-#     • Parallel secret probing (auto-tuned worker count) with early cancel
-# - Safety:
-#     • Skips if output already exists unless forced
-#     • Cancels outstanding workers immediately on success
-#
-# Optional dev check:
-#   Set HFE_SANITY=1 in env to cross-check fast path vs slow path on random
-#   evaluation points (costly; use sparingly just to reassure yourself).
+# - HFE: F(X) uses only exponents 2^i and 2^i+2^j (i<j), ≤ D
+# - Outputs pipeline .in, a public log, and a secret log (F,S,T,secret)
 ###############################################################################
+
 
 import sys, os, time, multiprocessing
 import random as pyrand
@@ -85,7 +75,7 @@ def pick_workers(cli_workers=None, max_secret_tries=2048, batch_size=256, n=0):
 def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
                           must_have_quad=True, must_have_lin=True):
     """
-    F(X) ∈ K[X], HFE-degree ≤ D.
+    F(X) in K[X], HFE-degree ≤ D
       • linearized: X^(2^i) with 2^i ≤ D
       • true quad : X^(2^i+2^j), i<j, ≤ D  (i=j collapses to linearized in char 2)
     """
@@ -143,17 +133,17 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
 
     return F, have_quad, have_lin
 
-# =================== Frobenius-aware fast public builder =====================
+# =================== Frobenius fast public builder =====================
 
 def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
     """
-    Build y(x) ∈ K^n with components in F2[x] directly, using Frobenius:
-      s(x) = c0 + sum_v c_v x_v,  c_• ∈ K determined by A_S,b_S and basis {a^k}
-      For term X^{2^i}:      s^{2^i} = c0^{2^i} + sum_v (c_v^{2^i}) x_v
-      For term X^{2^i+2^j}:  expand s^{2^i} * s^{2^j} into const/linear/quad in x.
-    Split each K-coefficient onto the power basis to fill the n coordinates.
+    Build y(x) in K^n with components in F2[x] directly, using Frobenius:
+      s(x) = c0 + sum_v c_v x_v,  c_• in K determined by A_S,b_S and basis {a^k}
+      For term X^{2^i}: s^{2^i} = c0^{2^i} + sum_v (c_v^{2^i}) x_v
+      For term X^{2^i+2^j}: expand s^{2^i} * s^{2^j} into const/linear/quad in x
+    Split each K-coefficient onto the power basis to fill the n coordinates
 
-    Returns list y[0..n-1] ⊂ F2[x].
+    Returns list y[0..n-1] contained in F2[x].
     """
     F2 = R.base_ring()
     x = R.gens()
@@ -182,7 +172,7 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
             val = val**2
             c_pow[t][i] = val
 
-    # Accumulators for y ∈ K^n but stored as F2[x] polys via basis splitting
+    # Accumulators for y in K^n but stored as F2[x] polys via basis splitting
     y = [R(0) for _ in range(n)]
     zero_mon = tuple(0 for _ in range(n))
 
@@ -204,7 +194,7 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
             add_Kcoef_mon(Kcoef, zero_mon)
             continue
 
-        # linearized 2^i?
+        # linearized 2^i
         if (eX & (eX - 1)) == 0:  # power of two
             i = eX.bit_length() - 1
             c0i = c_pow[i][0]
@@ -260,7 +250,7 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
 
     return y
 
-# ================= Project K[x] → n coordinates in F2[x] (slow; for sanity) ==
+# ================= Project K[x] onto n coordinates in F2[x] (slow; for sanity) ==
 
 def coords_over_F2(poly_Kx, K, a, n, R_F2):
     coords = [R_F2(0) for _ in range(n)]
@@ -322,8 +312,8 @@ _GLOBALS = {"derivs": None, "R": None, "n": None}
 
 def _install_worker_state(derivs, R, n):
     _GLOBALS["derivs"] = derivs
-    _GLOBALS["R"]      = R
-    _GLOBALS["n"]      = n
+    _GLOBALS["R"] = R
+    _GLOBALS["n"] = n
 
 def _probe_batch(batch_size, rank_min, seed=None):
     if seed is not None:
@@ -399,7 +389,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
 
         best = {"rank": -1, "bundle": None}  # (A_S,b_S,A_T,z0_R,x_star,degs)
 
-        # Compute worker count HERE with auto-tuning
+        # Compute worker count 
         W = pick_workers(workers, max_secret_tries=max_secret_tries, batch_size=batch_size, n=n)
         if L: log_write(L, f"Workers: {W}   (batch_size per task: {batch_size})")
 
@@ -431,7 +421,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                 log_write(L, f"[map {amap}] skipped: maxdeg < 2")
                 continue
 
-            # ---------- Optional sanity: compare with slow path on random points ----------
+            # ---------- Optional sanity ----------
             if os.environ.get("HFE_SANITY") == "1":
                 s_vec_K = []
                 for k in range(n):
@@ -463,9 +453,9 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             _install_worker_state(derivs, R, n)
 
             remaining = max_secret_tries
-            success   = None           # (x_tuple, rankJ)
+            success = None  # (x_tuple, rankJ)
             best_rank_seen = -1
-            best_point     = None
+            best_point = None
 
             if W <= 1:
                 t = 0
@@ -648,16 +638,16 @@ def main():
     else:
         out_infile = auto_out; arg_offset = 3
 
-    seed             = _parse_opt(sys.argv, arg_offset+0, int,   None)
-    prob_quad        = _parse_opt(sys.argv, arg_offset+1, float, 0.70)
-    prob_lin         = _parse_opt(sys.argv, arg_offset+2, float, 0.60)
-    rank_min_arg     = sys.argv[arg_offset+3] if len(sys.argv) > arg_offset+3 else None
-    rank_min         = None if _is_unset(rank_min_arg) else int(rank_min_arg)
-    allow_fallback   = _parse_bool(sys.argv[arg_offset+4] if len(sys.argv) > arg_offset+4 else None, False)
-    max_maps         = _parse_opt(sys.argv, arg_offset+5, int,   20)
+    seed = _parse_opt(sys.argv, arg_offset+0, int,   None)
+    prob_quad = _parse_opt(sys.argv, arg_offset+1, float, 0.70)
+    prob_lin = _parse_opt(sys.argv, arg_offset+2, float, 0.60)
+    rank_min_arg = sys.argv[arg_offset+3] if len(sys.argv) > arg_offset+3 else None
+    rank_min = None if _is_unset(rank_min_arg) else int(rank_min_arg)
+    allow_fallback = _parse_bool(sys.argv[arg_offset+4] if len(sys.argv) > arg_offset+4 else None, False)
+    max_maps = _parse_opt(sys.argv, arg_offset+5, int,   20)
     max_secret_tries = _parse_opt(sys.argv, arg_offset+6, int,   2048)
-    workers_arg      = sys.argv[arg_offset+7] if len(sys.argv) > arg_offset+7 else None
-    force_arg        = sys.argv[arg_offset+8] if len(sys.argv) > arg_offset+8 else None
+    workers_arg = sys.argv[arg_offset+7] if len(sys.argv) > arg_offset+7 else None
+    force_arg = sys.argv[arg_offset+8] if len(sys.argv) > arg_offset+8 else None
 
     force = _parse_bool(force_arg, False) or _parse_bool(os.environ.get("HFE_FORCE"), False)
 
@@ -668,7 +658,7 @@ def main():
 
     workers = pick_workers(workers_arg, max_secret_tries=max_secret_tries, batch_size=256, n=n)
 
-    logname   = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
+    logname = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
     secretlog = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
 
     print(f"[{now_str()}] Generating classical HFE instance (n={n}, D={D}) ...")
@@ -683,7 +673,7 @@ def main():
         logfile=logname, secret_logfile=secretlog, verbose=False,
         workers=workers, batch_size=256
     )
-    print(f"[{now_str()}] Log written to:        {logname}")
+    print(f"[{now_str()}] Log written to: {logname}")
     print(f"[{now_str()}] Secret log written to: {info.get('secret_logfile', secretlog)}")
     print(f"[{now_str()}] P(x*)=0: {info['ok_zero']}, rank(J_P(x*))={info['rankJ']}")
 

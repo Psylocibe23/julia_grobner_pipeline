@@ -10,7 +10,6 @@
 
 set -euo pipefail
 
-# Ensure these exist (where Slurm writes logs & where Julia writes results)
 mkdir -p logs results
 
 # Usage/args (same style as F4)

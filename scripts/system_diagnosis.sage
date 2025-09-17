@@ -4,23 +4,13 @@
 # This script reads a polynomial system from file, constructs the corresponding
 # polynomial ring and ideal, and prints a variety of diagnostic/statistical
 # properties of the system. These include variable count, sparsity, degrees,
-# homogeneity, Krull dimension, Hilbert polynomial, and more.
-# It is written for use in algebraic cryptanalysis and system profiling.
-#
-# NEW in this version:
-#   - Robust time budgets for expensive steps using a separate process:
-#       * --dim=<time>     : time budget for I.dimension()
-#       * --hilbert=<time> : time budget for I.hilbert_polynomial()
-#     <time> may be seconds ("90"), or "60s", "2m", "1m30s"; a trailing '+' is
-#     allowed and ignored ("60+" == "60"). 0 or omitted => skip that step.
+# homogeneity, Krull dimension, Hilbert polynomial.
 ###############################################################################
 
 import sys, os, re, time, multiprocessing
 from sage.all import *
 
-############################
-# 0. CLI helpers
-############################
+# ================ Utils ================
 
 def parse_time_budget(tok):
     """
@@ -62,16 +52,14 @@ def get_flag(argv, name, default="0"):
             return a[len(prefix):]
     return default
 
-############################
-# 1. Input parsing function
-############################
+# ================ Input parsing ================
 def parse_input_system(filename):
     """
-    Parse the input file describing the polynomial system.
+    Parse the input file describing the polynomial system
 
     Input format:
         - First line: comma-separated variable names
-        - Second line: field spec ("p" or "p^n" for GF(p^n))
+        - Second line: field spec (p)
         - Subsequent lines: one polynomial per line (as string), using the variable names
 
     Returns:
@@ -95,19 +83,12 @@ def parse_input_system(filename):
     polys = lines[2:]
     return var_names, F, field_desc, polys
 
-############################
-# 2. Homogeneity check
-############################
+# ================ Homogeneity check ================
 def is_homogeneous(poly):
-    """
-    Check if a polynomial is homogeneous.
-    """
     degs = [m.degree() for m in poly.monomials()]
     return len(set(degs)) == 1
 
-############################
-# 2.5 Heavy computations in a child process (real timeouts)
-############################
+# ================ Computations ================
 
 def _dim_worker(infile, outq):
     try:
@@ -142,14 +123,13 @@ def _hilbert_worker(infile, outq):
 
 def run_with_timeout(target, args, timeout_sec):
     """
-    Run 'target(*args)' in a separate process and enforce a wall-clock timeout.
-    Returns (status, value_or_message), where status ∈ {"ok","timeout","err"}.
+    Run in a separate process and enforce a wall-clock timeout.
+    Returns (status, value_or_message), where status: {"ok","timeout","err"}.
     """
     if timeout_sec <= 0:
         # treated as "skip"
         return ("skip", "skipped")
 
-    # Prefer 'fork' on Linux; fall back to 'spawn' elsewhere.
     try:
         ctx = multiprocessing.get_context("fork")
     except Exception:
@@ -173,15 +153,12 @@ def run_with_timeout(target, args, timeout_sec):
     else:
         return ("err", value)
 
-############################
-# 3. Main diagnostic logic
-############################
+# ================ Main ================
 def main():
     if len(sys.argv) < 2:
         print("Usage: sage system_diagnosis.sage <input_file.in> [--dim=SECONDS] [--hilbert=SECONDS]")
         sys.exit(1)
 
-    # Positional: first non-flag argument is the file
     infile = None
     for a in sys.argv[1:]:
         if not a.startswith("--"):
@@ -192,7 +169,7 @@ def main():
         sys.exit(1)
 
     # Budgets
-    dim_budget     = parse_time_budget(get_flag(sys.argv[1:], "dim", "0"))
+    dim_budget = parse_time_budget(get_flag(sys.argv[1:], "dim", "0"))
     hilbert_budget = parse_time_budget(get_flag(sys.argv[1:], "hilbert", "0"))
 
     outlog = infile.replace(".in", "_diagnostics.log").replace("data/", "logs/")
@@ -254,7 +231,7 @@ def main():
     else:
         log.append("Degree (Hilbert polynomial) computation skipped (no time budget).")
 
-    # No shape position/lex basis attempted!
+    # No shape position/lex basis attempted
     log.append("Shape position check skipped (lex Groebner basis not computed).")
 
     # --- Special forms: Boolean and quadratic ---
@@ -263,7 +240,7 @@ def main():
     is_quadratic = all(p.total_degree() <= 2 for p in polynomials)
     log.append(f"System is quadratic (all degree ≤2)? {'Yes' if is_quadratic else 'No'}")
 
-    # Save log (and echo to stdout)
+    # Save log 
     os.makedirs(os.path.dirname(outlog) or ".", exist_ok=True)
     with open(outlog, "w") as f:
         for line in log:

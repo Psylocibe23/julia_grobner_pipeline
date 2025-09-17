@@ -9,18 +9,11 @@
 #SBATCH --error=logs/%x_%j.err
 
 # Usage:
-#   sbatch run_FGLM_adjusted.sbatch <F4_or_F5_result.txt> [extra flags for fglm_adjusted.sage]
-#
-# Examples:
 #   sbatch run_FGLM_adjusted.sbatch results/HFE_n40_D80_F4_20250828_020103.txt \
 #           --assume-zerodim --fglm-timeout=1800 --reduce=auto --reduce-timeout=300
-#
-#   sbatch run_FGLM_adjusted.sbatch results/HFE_n80_D96_F4_YYYYMMDD_hhmmss.txt \
-#           --prefer=std --reduce=never
 
 set -euo pipefail
 
-# Ensure these exist
 mkdir -p logs results
 
 if [[ $# -lt 1 ]]; then
@@ -36,7 +29,6 @@ if [[ ! -f "$INPUT_FILE" ]]; then
   exit 2
 fi
 
-# Keep any math runtimes quiet; Sage/Singular don’t benefit from threading here
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -47,7 +39,7 @@ echo "[$(date)] CWD:      $(pwd)"
 echo "[$(date)] Input:    $INPUT_FILE"
 echo "[$(date)] Flags:    ${EXTRA_ARGS[*]:-<none>}"
 
-# Make 'module' available in non-login shells, then load Sage (Singularity build on your cluster)
+# Make 'module' available in non-login shells, then load Sage 
 if ! type module >/dev/null 2>&1; then
   [[ -f /etc/profile ]] && source /etc/profile
   [[ -f /etc/profile.d/modules.sh ]] && source /etc/profile.d/modules.sh
@@ -60,7 +52,6 @@ set -x
 sage scripts/fglm_adjusted.sage "$INPUT_FILE" "${EXTRA_ARGS[@]}"
 set +x
 
-# Best-effort hints for where outputs went (matches fglm_adjusted.sage naming)
 stem="$(basename "$INPUT_FILE" .txt)"
 lex_out="results/${stem}_LEX.txt"
 log_out="logs/${stem}_FGLM_adjusted.log"

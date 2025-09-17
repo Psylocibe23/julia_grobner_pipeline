@@ -4,9 +4,9 @@
 # What it does
 #   1) Loads a pipeline .in file (variables, p, polynomials).
 #   2) Rebuilds AnemoiPermutation with (p, alpha, rounds) and regenerates the
-#      PCICO equations (ℓ = 1) via model_P_CICO(..., final_ll=True, ordering=1).
+#      PCICO equations (l = 1) via model_P_CICO(..., final_ll=True, ordering=1).
 #      Compares the two polynomial sets (up to ring coercion).
-#   3) Brute-forces (or samples) y0 ∈ GF(p) with x_in=0 to find cases where the
+#   3) Brute-forces (or samples) y0 in GF(p) with x_in=0 to find cases where the
 #      final linear-layer x-output is 0 (PCICO condition). For each found y0, it
 #      computes s_t = y_in[t] - y_out[t] per round and checks ALL input-file
 #      polynomials vanish under the assignment {Y0000=y0, S0100=s1, ..., Sr00}.
@@ -16,15 +16,14 @@
 #        --infile data/ANEMOI_p251_r2_a3_PCICO.in --alpha 3 --rounds 2
 #
 # Options
-#   --tries N       : random y0 trials if p is large (default 500)
-#   --exhaustive    : try all y0 ∈ GF(p) (auto-enabled if p ≤ 50000)
-#   --max-sol K     : stop after confirming K solutions (default 2)
-#   --verbose       : print extra details
+#   --tries N : random y0 trials if p is large (default 500)
+#   --exhaustive : try all y0 in GF(p) (auto-enabled if p ≤ 50000)
+#   --max-sol K : stop after confirming K solutions (default 2)
+#   --verbose : print extra details
 ###############################################################################
 
 import sys, os, random
 
-# Make sure we can import our local copies
 if os.path.isdir("scripts"):
     sys.path.insert(0, os.path.abspath("scripts"))
 
@@ -37,7 +36,7 @@ def usage():
           "[--tries N] [--exhaustive] [--max-sol K] [--verbose]", file=sys.stderr)
     sys.exit(1)
 
-# ---------------- CLI ----------------
+# ================ CLI ================
 argv = sys.argv[1:]
 args = {
     "infile": None,
@@ -71,7 +70,7 @@ while i < len(argv):
 if args["infile"] is None or args["alpha"] is None or args["rounds"] is None:
     usage()
 
-# ---------------- Parse .in ----------------
+# ================ Parse .in ================
 with open(args["infile"], "r") as f:
     lines = [ln.strip() for ln in f if ln.strip()]
 
@@ -94,7 +93,7 @@ F = GF(p)
 R_file = PolynomialRing(F, var_names, order='degrevlex')
 G_file = [R_file(s) for s in poly_strs]
 
-# ---------------- Rebuild model equations & compare ----------------
+# ================ Rebuild model equations & compare ================
 alpha = args["alpha"]
 r = args["rounds"]
 if gcd(alpha, p-1) != 1:
@@ -111,25 +110,22 @@ set_model = {str(g) for g in G_model_fileRing}
 same_polys = (set_file == set_model)
 
 print("== Polynomial-set comparison ==")
-print(f"  #file eqs = {len(G_file)}")
-print(f"  #model eqs = {len(G_model_fileRing)}")
-print(f"  sets equal? {same_polys}")
+print(f"#file eqs = {len(G_file)}")
+print(f"#model eqs = {len(G_model_fileRing)}")
+print(f"sets equal? {same_polys}")
 if not same_polys:
     only_in_file  = set_file - set_model
     only_in_model = set_model - set_file
-    print(f"  [!] {len(only_in_file)} equations only in .in file")
-    print(f"  [!] {len(only_in_model)} equations only in model")
+    print(f"[!] {len(only_in_file)} equations only in .in file")
+    print(f"[!] {len(only_in_model)} equations only in model")
     # keep going; evaluation test below is the decisive check
 
 # Degree summary (cheap sanity)
 degs = [g.total_degree() for g in G_file]
 print("== Degree summary (from file) ==")
-print(f"  degrees: {degs}  (max={max(degs)})")
+print(f"degrees: {degs}  (max={max(degs)})")
 
-# ---------------- Concrete evaluation check ----------------
-# We search y0 with x_in=0 and final-LL x_out=0. For each such y0, compute s_t and
-# evaluate all polynomials from the file at the assignment.
-
+# ================ Concrete evaluation check ================
 def find_assignments(max_needed=2, exhaustive=False, tries=500, verbose=False):
     sols = []
     # generator of y0 candidates
@@ -196,7 +192,6 @@ if len(sols) == 0:
     print("  [note] no solutions found with given search budget. This can happen for large p "
           "with random sampling. Try --exhaustive (if p is small) or increase --tries.")
 else:
-    # echo one solution nicely
     y0, svals, assign = sols[0]
     def pv(a):  # pretty value as int
         try:

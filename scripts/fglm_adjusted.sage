@@ -1,37 +1,29 @@
-#!/usr/bin/env sage
-# -*- coding: utf-8 -*-
 ###############################################################################
-# fglm_adjusted.sage — DRL → LEX with safe FGLM first, std(lex) fallback.
+# fglm_adjusted.sage — DRL to LEX with safe FGLM first, std(lex) fallback.
 #
 # PURPOSE
-#   Given a DRL Gröbner basis over GF(p) (your F4/F5 output), produce a LEX
-#   Gröbner basis suitable for your solution extractor. We:
-#     • Try Option A (safe FGLM) first: Ideal.transformed_basis('fglm', R_lex)
+#   Given a DRL Gröbner basis over GF(p), produce a LEX
+#   • Try Option A (safe FGLM) first: Ideal.transformed_basis('fglm', R_lex)
 #       then (optionally) reduce using Singular Buchberger (no Hilbert).
-#     • On failure/timeout, fall back to Option B: compute std in pure LEX
+#   • On failure/timeout, fall back to Option B: compute std in pure LEX
 #       with Singular’s Buchberger (algorithm='singular:std').
-#
-# DESIGN
-#   • Input:  file like your F4/F5 outputs (headers + “# --- Groebner basis ---”).
-#   • Output: results/<stem>_LEX.txt   + logs/<stem>_FGLM_adjusted.log
-#   • No Hilbert / stdhilb calls anywhere (robust for large systems).
 #
 # CLI
 #   sage scripts/fglm_adjusted.sage <F4_or_F5_result.txt>
-#       [--assume-zerodim]                # skip dimension() (treat as 0)
-#       [--dim-timeout=SECONDS]           # default 60
-#       [--fglm-timeout=SECONDS]          # default 0 = unlimited
-#       [--reduce=never|auto|always]      # default 'never'
-#       [--reduce-timeout=SECONDS]        # default 120
-#       [--prefer=auto|fglm|std]          # default 'auto'
+#       [--assume-zerodim] # skip dimension() (treat as 0)
+#       [--dim-timeout=SECONDS] # default 60
+#       [--fglm-timeout=SECONDS] # default 0 = unlimited
+#       [--reduce=never|auto|always] # default 'never'
+#       [--reduce-timeout=SECONDS] # default 120
+#       [--prefer=auto|fglm|std] # default 'auto'
 #
 #  Notes:
-#    • reduce=never   : write the raw LEX basis (fastest, safest)
-#      reduce=auto    : try to reduce with std; if it times out, keep raw
-#      reduce=always  : fail the job if reduction times out
-#    • prefer=auto    : try FGLM → fallback to std(lex)
-#      prefer=fglm    : only attempt FGLM (no fallback)
-#      prefer=std     : skip FGLM and do std(lex) directly
+#    • reduce=never: write the raw LEX basis (fastest, safest)
+#      reduce=auto: try to reduce with std; if it times out, keep raw
+#      reduce=always: fail the job if reduction times out
+#    • prefer=auto: try FGLM to fallback to std(lex)
+#      prefer=fglm: only attempt FGLM (no fallback)
+#      prefer=std: skip FGLM and do std(lex) directly
 #
 # EXAMPLE
 #   sage scripts/fglm_adjusted.sage <drl file .txt> --assume-zerodim --fglm-timeout=1800 --reduce=auto --reduce-timeout=300
@@ -40,7 +32,7 @@
 
 import sys, os, time, signal
 
-# ---------------- Utilities ----------------
+# ================ Utilities ================
 def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -74,7 +66,7 @@ def run_with_timeout(fn, seconds, on_timeout=None):
     else:
         return fn()
 
-# ---------------- Parse an F4/F5 basis file ----------------
+# ================ Parse an F4/F5 basis file ================
 def read_groebner_basis_file(result_file):
     variables, field_p, order = None, None, None
     basis_start = None
@@ -116,7 +108,7 @@ def read_groebner_basis_file(result_file):
 
     return variables, field_p, (order or "UNKNOWN"), polys
 
-# ---------------- Shape-position checks (for info only) ----------------
+# ================ Shape-position checks (for info only) ================
 def shape_heuristic(variables, G_lex):
     try:
         G_sorted = sorted(G_lex, key=lambda g: g.lm(), reverse=True)
@@ -154,7 +146,7 @@ def shape_strict(variables, G_lex):
             return False
     return True
 
-# ---------------- Core runners ----------------
+# ================ FGLM ================
 def run_fglm_safe(I_drl, R_lex, timeout_sec, log):
     """
     Option A: Safe FGLM (no Hilbert). Uses Sage/Singular's FGLM wrapper.
@@ -198,7 +190,7 @@ def run_std_lex_direct(R_lex, polys_lex, timeout_sec, log):
     log_and_print(f"[B] std(lex) done in {t1 - t0:.3f} s  (|G_lex|={len(G_lex)})", log)
     return G_lex
 
-# ---------------- Main ----------------
+# ================ Main ================
 def main():
     from sage.all import GF, PolynomialRing
 
@@ -212,11 +204,11 @@ def main():
 
     # Defaults
     assume_zerodim = False
-    dim_timeout    = 60
-    fglm_timeout   = 0      # 0 = unlimited
-    reduce_mode    = "never"  # never|auto|always
+    dim_timeout = 60
+    fglm_timeout = 0  # 0 = unlimited
+    reduce_mode = "never"  # never|auto|always
     reduce_timeout = 120
-    prefer_mode    = "auto"   # auto|fglm|std
+    prefer_mode = "auto" # auto|fglm|std
 
     # Flags
     for a in sys.argv[2:]:
@@ -236,19 +228,19 @@ def main():
             print(f"Unknown flag '{a}'"); sys.exit(2)
 
     results_dir = "results"
-    logs_dir    = "logs"
+    logs_dir = "logs"
     ensure_dir(results_dir); ensure_dir(logs_dir)
 
-    base_name   = stem_of(result_file)
+    base_name = stem_of(result_file)
     lex_outfile = os.path.join(results_dir, base_name + "_LEX.txt")
-    log_outfile = os.path.join(logs_dir,    base_name + "_FGLM_adjusted.log")
+    log_outfile = os.path.join(logs_dir, base_name + "_FGLM_adjusted.log")
 
     with open(log_outfile, "w") as log:
         log_and_print("==============================================================", log)
-        log_and_print(" FGLM-ADJUSTED — DRL → LEX with safe FGLM and std(lex) fallback", log)
+        log_and_print(" FGLM-ADJUSTED — DRL -> LEX with safe FGLM and std(lex) fallback", log)
         log_and_print("==============================================================", log)
-        log_and_print(f"Input file:  {result_file}", log)
-        log_and_print(f"LEX out:     {lex_outfile}", log)
+        log_and_print(f"Input file: {result_file}", log)
+        log_and_print(f"LEX out: {lex_outfile}", log)
         log_and_print(f"prefer={prefer_mode}, reduce={reduce_mode}, timeouts: dim={dim_timeout}s, fglm={fglm_timeout or '∞'}s, red={reduce_timeout}s", log)
         log_and_print("--------------------------------------------------------------", log)
 
@@ -294,12 +286,12 @@ def main():
 
             # Decide plan
             try_fglm = (prefer_mode in ("auto","fglm"))
-            try_std  = (prefer_mode in ("auto","std"))
+            try_std = (prefer_mode in ("auto","std"))
 
             G_lex_raw = None
             method_used = None
 
-            # ---- Option A: Safe FGLM
+            # Option A: Safe FGLM
             if try_fglm:
                 try:
                     G_lex_raw = run_fglm_safe(I_drl, R_lex, fglm_timeout, log)
@@ -309,7 +301,7 @@ def main():
                 except Exception as e:
                     log_and_print(f"[A] FGLM raised: {e}", log)
 
-            # ---- Option B: std(lex) fallback
+            # Option B: std(lex) fallback
             if G_lex_raw is None and try_std:
                 try:
                     # Re-parse input polys in LEX ring (strings are the same)
@@ -326,7 +318,7 @@ def main():
             if G_lex_raw is None:
                 raise RuntimeError("Both methods failed (or were disabled).")
 
-            # ---- Optional reduction (never/auto/always), always via singular:std
+            #  Optional reduction (never/auto/always), always via singular:std
             reduce_mode_norm = reduce_mode.lower()
             if reduce_mode_norm == "never":
                 G_lex = G_lex_raw
@@ -343,7 +335,7 @@ def main():
                     else:
                         raise
 
-            # ---- Shape info and degrees
+            # Shape info and degrees
             out_degs = [g.total_degree() for g in G_lex]
             log_and_print(f"Basis size(out): {len(G_lex)}  (method={method_used}, reduced={reduced_flag})", log)
             log_and_print(f"Degrees(out): max={max(out_degs)}, first10={out_degs[:10]}{'...' if len(out_degs)>10 else ''}", log)
@@ -353,7 +345,7 @@ def main():
             log_and_print(f"Shape position (heuristic): {shape_h}", log)
             log_and_print(f"Shape position (strict):    {shape_s}", log)
 
-            # ---- Write LEX file (your extractor can read this header)
+            # Write LEX file 
             log_and_print(f"Writing LEX basis to: {lex_outfile}", log)
             with open(lex_outfile, "w") as out:
                 out.write(f"# Lex Groebner basis (FGLM-adjusted: {method_used}) for {result_file}\n")

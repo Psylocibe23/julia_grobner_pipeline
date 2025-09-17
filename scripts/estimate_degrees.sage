@@ -11,9 +11,7 @@ import sys, re, time
 from random import randrange
 from sage.all import GF, PolynomialRing, matrix, random_vector
 
-# ------------------------------
-# Utilities: parse pipeline .in
-# ------------------------------
+# ================= Utilities =================
 def parse_in_file(infile):
     with open(infile, "r") as f:
         lines = [ln.strip() for ln in f if ln.strip()]
@@ -55,9 +53,7 @@ def parse_in_file(infile):
 
     return var_names, F, R, public_polys, field_polys
 
-# --------------------------------------
-# Macaulay bound for d_solv (DRL setting)
-# --------------------------------------
+# ================ Macaulay bound for d_solv (DRL setting) =================
 def macaulay_bound_top(n, degrees):
     if len(degrees) < n+1:
         return None, f"Not enough equations for the bound (need ≥ n+1, have {len(degrees)})."
@@ -66,9 +62,7 @@ def macaulay_bound_top(n, degrees):
     bound = sum(top) - n
     return bound, f"Top (n+1) degrees = {top} ⇒ bound = {bound}"
 
-# --------------------------------------------------
-# Build degree-2 / degree-3 monomial bases (with rep)
-# --------------------------------------------------
+# ================= Build degree-2 / degree-3 monomial bases (with rep) =================
 def deg2_monomials(R):
     x = R.gens()
     n = len(x)
@@ -91,9 +85,7 @@ def deg3_monomials(R):
                 monos.append(xij * x[k])
     return monos
 
-# ---------------------------------------------------------
-# Boolean Macaulay M2: rows=m_public, cols=deg-2 monomials
-# ---------------------------------------------------------
+# ================= Boolean Macaulay M2: rows=m_public, cols=deg-2 monomials =================
 def boolean_macaulay_M2(public_polys, R):
     F2 = GF(2)
     deg2 = deg2_monomials(R)
@@ -112,9 +104,7 @@ def boolean_macaulay_M2(public_polys, R):
     M = matrix(F2, nrows, ncols, entries, sparse=True)
     return M, deg2
 
-# -----------------------------------------------------------
-# Boolean Macaulay M3: rows=m_public*n (x_j * f_i), cols=deg-3
-# -----------------------------------------------------------
+# ================= Boolean Macaulay M3: rows=m_public*n (x_j * f_i), cols=deg-3 =================
 def boolean_macaulay_M3(public_polys, R):
     F2 = GF(2)
     x = R.gens()
@@ -140,9 +130,7 @@ def boolean_macaulay_M3(public_polys, R):
     M = matrix(F2, nrows, ncols, entries, sparse=True)
     return M, deg3
 
-# -------------------------------------------------------
-# First-fall heuristic at degree 3 (randomized, very fast)
-# -------------------------------------------------------
+# ================= First-fall heuristic at degree 3 (randomized, very fast) =================
 def first_fall_degree3_heuristic(public_polys, R, trials=64, sample_per_trial=None, rng=None):
     if rng is None:
         from random import Random
@@ -183,16 +171,12 @@ def first_fall_degree3_heuristic(public_polys, R, trials=64, sample_per_trial=No
 
     return False, trials
 
-# -----------------------------
-# Helper: approximate nnz in M
-# -----------------------------
 def approx_nnz(M):
     """
     Try to count nonzeros; if not available, estimate via density.
     """
     # Try a reliable path first
     try:
-        # This exists on many Sage matrix types
         return len(list(M.nonzero_positions()))
     except Exception:
         pass
@@ -202,9 +186,7 @@ def approx_nnz(M):
     except Exception:
         return None
 
-# ----------- 
-# Main driver
-# ----------- 
+# ================= Main =================
 def main():
     if len(sys.argv) < 2:
         print("Usage: sage scripts/estimate_degrees.sage <input.in> [--trials N] [--skip-m3]")
@@ -212,7 +194,7 @@ def main():
 
     infile = sys.argv[1]
     trials = 64
-    do_m3  = True
+    do_m3 = True
 
     args = sys.argv[2:]
     i = 0
@@ -232,10 +214,10 @@ def main():
     print("==============================================================")
     print(" FAST DEGREE ESTIMATES (pre-GB) — Boolean MQ over GF(2)")
     print("==============================================================")
-    print(f"System:      {infile}")
-    print(f"Variables:   n = {n}   ({var_names})")
-    print(f"Public eqs:  m = {m_pub}")
-    print(f"Field eqs:   {'present' if field_polys is not None else 'absent / unrecognized'}")
+    print(f"System: {infile}")
+    print(f"Variables: n = {n}   ({var_names})")
+    print(f"Public eqs: m = {m_pub}")
+    print(f"Field eqs: {'present' if field_polys is not None else 'absent / unrecognized'}")
     print("--------------------------------------------------------------")
 
     degs_pub = [f.total_degree() for f in public_polys]
@@ -261,7 +243,7 @@ def main():
     print(f"  rank over GF(2): {r2}")
     print(f"  time: {t1 - t0:.3f} s")
     if r2 == M2.ncols():
-        print("  ⇒ Full column rank at degree 2 ⇒ predict d_solv ≤ 3")
+        print("  -> Full column rank at degree 2 -> predict d_solv ≤ 3")
 
     # Degree 3
     if do_m3:
@@ -277,7 +259,7 @@ def main():
         print(f"  rank over GF(2): {r3}")
         print(f"  time: {t3 - t2:.3f} s")
         if r2 != M2.ncols() and r3 == M3.ncols():
-            print("  ⇒ Full column rank at degree 3 ⇒ predict d_solv ≤ 4")
+            print("  -> Full column rank at degree 3 -> predict d_solv ≤ 4")
     else:
         print("--------------------------------------------------------------")
         print("Boolean Macaulay @ degree 3: skipped (use --skip-m3 to skip / default runs it).")
