@@ -1,10 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=fglm_adj
-#SBATCH --partition=turing-long
+#SBATCH --qos=tesi_spreafichi
+#SBATCH --partition=turing-wide,Main,lovelace
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1         
-#SBATCH --mem=64G                
-#SBATCH --time=08:00:00           
+#SBATCH --mem=128G                
+#SBATCH --time=24:00:00           
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
