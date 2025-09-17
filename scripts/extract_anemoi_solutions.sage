@@ -107,7 +107,7 @@ def shape_strict(variables, G):
         if cand[0].degree(v) != 1: return False
     return True
 
-# ---------- Univariate conversion ----------
+# ================ Univariate conversion ================
 def to_true_univariate(poly_mv, var, R, F):
     gens = list(R.gens())
     i = gens.index(var)
@@ -124,7 +124,7 @@ def to_true_univariate(poly_mv, var, R, F):
         arr[e[i]] += F(c)
     return U(arr)
 
-# ---------- Triangular back-substitution over a field K ----------
+# ================ Triangular back-substitution over a field K ================
 def solve_triangular_over_field(variables, G_lex, K, last_roots,
                                 first_only=False, max_solutions=None, log=None):
     """
@@ -210,7 +210,7 @@ def solve_triangular_over_field(variables, G_lex, K, last_roots,
 
     return sols
 
-# ---------- Main driver ----------
+# ================ Main ================
 def main():
     if len(sys.argv) < 2:
         print("Usage: sage scripts/extract_anemoi_solutions.sage results/<stem>_LEX.txt "
@@ -222,11 +222,11 @@ def main():
         print(f"File not found: {lex_file}"); sys.exit(2)
 
     # Flags
-    enum_maxdeg   = 4
-    first_only    = False
+    enum_maxdeg = 4
+    first_only = False
     max_solutions = None
-    try_elim      = False
-    skip_enum     = False
+    try_elim = False
+    skip_enum = False
 
     i = 2
     while i < len(sys.argv):
@@ -251,8 +251,8 @@ def main():
     ensure_dir(results_dir); ensure_dir(logs_dir)
     base = stem_of(lex_file)
     report_out = os.path.join(results_dir, base + "_AC_report.txt")
-    sols_out   = os.path.join(results_dir, base + "_AC_solutions.txt")
-    log_out    = os.path.join(logs_dir,    base + "_AC_extract.log")
+    sols_out = os.path.join(results_dir, base + "_AC_solutions.txt")
+    log_out = os.path.join(logs_dir, base + "_AC_extract.log")
 
     with open(log_out, "w") as log:
         logprint("==============================================================", log)
@@ -271,17 +271,17 @@ def main():
         I = R.ideal(G_lex)
 
         logprint(f"Variables: {variables}", log)
-        logprint(f"Field:     GF({p})", log)
-        logprint(f"Order:     {order}", log)
+        logprint(f"Field: GF({p})", log)
+        logprint(f"Order: {order}", log)
         logprint(f"Basis size: {len(G_lex)}", log)
-        if shape_hdr is not None:  logprint(f"Header says shape position: {shape_hdr}", log)
-        if zdim_hdr  is not None:  logprint(f"Header says zero-dimensional: {zdim_hdr}", log)
+        if shape_hdr is not None: logprint(f"Header says shape position: {shape_hdr}", log)
+        if zdim_hdr  is not None: logprint(f"Header says zero-dimensional: {zdim_hdr}", log)
 
         # Shape check
         shp_h = shape_heuristic(variables, G_lex)
         shp_s = shape_strict(variables, G_lex)
         logprint(f"Shape position (heuristic): {shp_h}", log)
-        logprint(f"Shape position (strict):    {shp_s}", log)
+        logprint(f"Shape position (strict): {shp_s}", log)
 
         # Find the univariate eliminant in the last variable
         v_last_name = variables[-1]
@@ -307,12 +307,12 @@ def main():
 
         # Convert to true univariate f(T) over F
         f_last = to_true_univariate(eliminant, v_last, R, F)
-        deg_f  = f_last.degree()
-        sf     = f_last.squarefree_part()
+        deg_f = f_last.degree()
+        sf = f_last.squarefree_part()
         deg_sf = sf.degree()
 
-        # Factorization over F_p (to see required extensions & multiplicities)
-        fac = f_last.factor()  # [(h,e), ...]
+        # Factorization over F_p 
+        fac = f_last.factor()  
         # Build factor summary
         breakdown = {}  # degree d -> (sum multiplicity-degree, num factors, total roots over K)
         for (h,e) in fac:
@@ -372,7 +372,7 @@ def main():
             t1 = time.time()
             logprint(f"Enumeration done in {t1 - t0:.3f} s — {len(all_solutions)} solution(s) found.", log)
 
-            # Write solutions (pretty)
+            # Write solutions 
             if all_solutions:
                 with open(sols_out, "w") as out:
                     out.write(f"# Solutions (possibly in extensions) for {lex_file}\n")

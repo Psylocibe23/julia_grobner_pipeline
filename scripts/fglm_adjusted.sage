@@ -31,6 +31,12 @@
 ###############################################################################
 
 import sys, os, time, signal
+import sys
+from sage.misc.sage_eval import sage_eval
+from sage.interfaces.singular import singular
+
+# allow parsing of very large polynomials
+sys.setrecursionlimit(max(sys.getrecursionlimit(), 500000))
 
 # ================ Utilities ================
 def ensure_dir(path):
@@ -255,7 +261,36 @@ def main():
             # Build rings and ideals
             R_drl = PolynomialRing(GF(p), variables, order='degrevlex')
             R_lex = PolynomialRing(GF(p), variables, order='lex')
-            G_drl = [R_drl(s) for s in polys_str]
+            def parse_poly_safe(txt, R):
+                # 1) fast path
+                try:
+                    return R(txt)
+                except RecursionError:
+                    pass
+                except Exception:
+                    # keep trying below
+                    pass
+
+                # 2) sage_eval with mapped generators
+                try:
+                    return sage_eval(txt, locals=R.gens_dict(), locals_fallback=False)
+                except RecursionError:
+                    pass
+                except Exception:
+                    pass
+
+                # 3) Singular parser in the correct ring, then coerce back
+                try:
+                    # Switch Singular to the same ring as R
+                    singular.setring(R._singular_())
+                    singular.eval('poly __tmp__ = ' + txt + ';')
+                    sp = singular('__tmp__')    # Singular polynomial
+                    return R(sp)                # coerce back to Sage polynomial
+                except Exception as e:
+                    raise RuntimeError(f"Failed to parse polynomial via all methods: {e}")
+
+            G_drl = [parse_poly_safe(s, R_drl) for s in polys_str]
+
             I_drl = R_drl.ideal(G_drl)
 
             # Optional small stats
@@ -304,10 +339,9 @@ def main():
             # Option B: std(lex) fallback
             if G_lex_raw is None and try_std:
                 try:
-                    # Re-parse input polys in LEX ring (strings are the same)
-                    polys_lex = [R_lex(s) for s in polys_str]
-                    # Let std(lex) have as much time as fglm_timeout (or unlimited if 0)
-                    std_timeout = fglm_timeout
+                    # Re-parse input polys in LEX ring with the *same* safe parser
+                    polys_lex = [parse_poly_safe(s, R_lex) for s in polys_str]
+                    std_timeout = fglm_timeout  # keep same global timeout policy
                     G_lex_raw = run_std_lex_direct(R_lex, polys_lex, std_timeout, log)
                     method_used = "std(lex)"
                 except _Timeout:
