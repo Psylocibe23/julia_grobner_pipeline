@@ -1,3 +1,4 @@
+#!/bin/bash
 #SBATCH --job-name=ac_extract
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --ntasks=1
