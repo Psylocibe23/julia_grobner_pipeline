@@ -31,7 +31,6 @@
 ###############################################################################
 
 import sys, os, time, signal
-import sys
 from sage.misc.sage_eval import sage_eval
 from sage.interfaces.singular import singular
 
