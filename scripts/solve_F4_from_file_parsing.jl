@@ -3,8 +3,8 @@
 ################################################################################
 
 using AlgebraicSolving              # F4, Ideal, normal_form, etc.
-using AbstractAlgebra               # MPolyBuildCtx
-using Nemo                          # GF(p)
+import AbstractAlgebra               # MPolyBuildCtx
+import Nemo                          # GF(p)
 using Dates, Printf
 using Base.Filesystem: mkpath, basename, splitext
 
@@ -87,8 +87,8 @@ end
 var_names, p, poly_strs = parse_input_system(filename)
 
 # ---------------- Ring ----------------
-K = GF(p)
-R, vars = polynomial_ring(K, var_names; internal_ordering = :degrevlex)
+K = Nemo.GF(p)
+R, vars = AbstractAlgebra.polynomial_ring(K, var_names; internal_ordering = :degrevlex)
 # Bind variables into Main so printer matches input names (not strictly needed)
 for (i, v) in enumerate(var_names)
     @eval Main $(Symbol(v)) = vars[$i]
