@@ -46,18 +46,17 @@ echo "[$(date)] Threads to F4 (nr_thrds): $THREADS"
 
 # Ensure deps exist in this environment
 julia --project=$JULIA_PROJECT -e '
-using Pkg;
-Pkg.activate(".");
+using Pkg
+Pkg.activate(".")
 for pkg in ["AlgebraicSolving","AbstractAlgebra","Nemo"]
-    try
-        isnothing(Base.find_package(pkg)) && Pkg.add(pkg)
-    catch e
-        @warn("Pkg.add failed"; pkg, e)
-        rethrow(e)
+    if isnothing(Base.find_package(pkg))
+        @info "Pkg.add…" pkg=pkg
+        Pkg.add(pkg)
     end
 end
-Pkg.precompile();
-Pkg.status() |> println;
+Pkg.instantiate()
+Pkg.precompile()
+Pkg.status() |> println
 '
 
 # Run
