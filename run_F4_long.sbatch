@@ -42,6 +42,14 @@ module load julia
 which julia
 julia -v
 
+# --- Julia env (project + depot) ---
+export JULIA_PROJECT=$PWD
+# optional but recommended on HPC: put depot in fast scratch
+export JULIA_DEPOT_PATH=${JULIA_DEPOT_PATH:-$HOME/.julia}
+
+# warm-up (no-op if already instantiated)
+julia --project=$JULIA_PROJECT -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
 # run
 julia scripts/solve_F4_from_file_parsing.jl "$INPUT_FILE" "$THREADS"
 
