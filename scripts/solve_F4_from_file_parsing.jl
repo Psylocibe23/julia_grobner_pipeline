@@ -203,7 +203,7 @@ open(log_file, "w") do logio
             t0 = time()
             G = nothing
             try
-                @time G = groebner_basis(I; nr_thrds = nthreads, info_level = 2)
+                @time G = groebner_basis(I; la_option=44, nr_thrds = nthreads, info_level = 2, initial_hts = 22, max_nr_pairs = 30000)
             catch err
                 println("\nF4 FAILED:\n$err")
                 rethrow(err)

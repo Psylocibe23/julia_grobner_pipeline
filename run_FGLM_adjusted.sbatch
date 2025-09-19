@@ -30,6 +30,8 @@ if [[ ! -f "$INPUT_FILE" ]]; then
   exit 2
 fi
 
+ulimit -s unlimited
+
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1

@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=gb_F4_long
 #SBATCH --qos=tesi_spreafichi
-#SBATCH --partition=turing-wide,Main,lovelace
+#SBATCH --partition=turing-wide
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=512G
-#SBATCH --time=24:00:00
+#SBATCH --mem=960G                 
+#SBATCH --time=96:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
@@ -18,23 +18,21 @@ if [[ $# -lt 1 ]]; then
 fi
 
 INPUT_FILE="$1"
-THREADS="${2:-${SLURM_CPUS_PER_TASK:-8}}"
+THREADS="${2:-${SLURM_CPUS_PER_TASK:-32}}"
 
 [[ -f "$INPUT_FILE" ]] || { echo "Input not found: $INPUT_FILE"; exit 2; }
 
-# Avoid oversubscription from math libs
+# avoid oversubscription from math libs (F4 uses its own threads)
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
-export JULIA_NUM_THREADS="$THREADS"
+export JULIA_NUM_THREADS=1
 
 echo "[$(date)] Node(s): ${SLURM_JOB_NODELIST:-unknown}"
-echo "[$(date)] CWD: $(pwd)"
 echo "[$(date)] Input: $INPUT_FILE"
-echo "[$(date)] Threads: $THREADS"
+echo "[$(date)] Threads to F4 (nr_thrds): $THREADS"
 
-# Load Julia
+# modules
 if ! type module >/dev/null 2>&1; then
   [[ -f /etc/profile ]] && source /etc/profile
   [[ -f /etc/profile.d/modules.sh ]] && source /etc/profile.d/modules.sh
@@ -43,14 +41,8 @@ module load julia
 
 which julia
 julia -v
-julia -e 'println("Julia ok; Threads=", Threads.nthreads())'
 
-# Optional: use local depot/project to reduce network pressure (uncomment if helpful)
-# export JULIA_DEPOT_PATH="$PWD/.julia_depot"
-# export JULIA_PROJECT="$PWD"
-# julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
-
-# Run
+# run
 julia scripts/solve_F4_from_file_parsing.jl "$INPUT_FILE" "$THREADS"
 
 echo "[$(date)] Listing results/:"
