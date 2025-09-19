@@ -4,8 +4,8 @@
 #SBATCH --partition=turing-wide
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=960G                 
-#SBATCH --time=2-00:00:00
+#SBATCH --mem=980G                 
+#SBATCH --time=2-00:00:00           
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
@@ -19,39 +19,49 @@ fi
 
 INPUT_FILE="$1"
 THREADS="${2:-${SLURM_CPUS_PER_TASK:-32}}"
-
 [[ -f "$INPUT_FILE" ]] || { echo "Input not found: $INPUT_FILE"; exit 2; }
 
-# avoid oversubscription from math libs (F4 uses its own threads)
+# avoid oversubscription from math libs (AlgebraicSolving uses its own threads)
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export JULIA_NUM_THREADS=1
 
-echo "[$(date)] Node(s): ${SLURM_JOB_NODELIST:-unknown}"
-echo "[$(date)] Input: $INPUT_FILE"
-echo "[$(date)] Threads to F4 (nr_thrds): $THREADS"
+# If your site pkg server is flaky, uncomment:
+# export JULIA_PKG_SERVER=
 
-# modules
+# Use repo as the project; keep depot in HOME
+export JULIA_PROJECT=$PWD
+export JULIA_DEPOT_PATH=${JULIA_DEPOT_PATH:-$HOME/.julia}
+
 if ! type module >/dev/null 2>&1; then
   [[ -f /etc/profile ]] && source /etc/profile
   [[ -f /etc/profile.d/modules.sh ]] && source /etc/profile.d/modules.sh
 fi
 module load julia
 
-which julia
-julia -v
+echo "[$(date)] Node(s): ${SLURM_JOB_NODELIST:-unknown}"
+echo "[$(date)] Input: $INPUT_FILE"
+echo "[$(date)] Threads to F4 (nr_thrds): $THREADS"
 
-# --- Julia env (project + depot) ---
-export JULIA_PROJECT=$PWD
-# optional but recommended on HPC: put depot in fast scratch
-export JULIA_DEPOT_PATH=${JULIA_DEPOT_PATH:-$HOME/.julia}
+# Ensure deps exist in this environment
+julia --project=$JULIA_PROJECT -e '
+using Pkg;
+Pkg.activate(".");
+for pkg in ["AlgebraicSolving","AbstractAlgebra","Nemo"]
+    try
+        isnothing(Base.find_package(pkg)) && Pkg.add(pkg)
+    catch e
+        @warn("Pkg.add failed"; pkg, e)
+        rethrow(e)
+    end
+end
+Pkg.precompile();
+Pkg.status() |> println;
+'
 
-# warm-up (no-op if already instantiated)
-julia --project=$JULIA_PROJECT -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
-
-# run
-julia scripts/solve_F4_from_file_parsing.jl "$INPUT_FILE" "$THREADS"
+# Run
+julia --project=$JULIA_PROJECT scripts/solve_F4_from_file_parsing.jl "$INPUT_FILE" "$THREADS"
 
 echo "[$(date)] Listing results/:"
 ls -lh results || true
