@@ -66,7 +66,7 @@ function parse_input_system(path::AbstractString)
     length(lines) ≥ 3 || error("Input file must have ≥ 3 lines.")
     # vars
     var_line = strip(lines[1]); var_line ≠ "" || error("Line 1 (variables) is empty.")
-    var_names = [strip(v) for v in split(var_line, ",")]
+    var_names = [String(strip(v)) for v in split(var_line, ",")]
     any(isempty, var_names) && error("Empty variable name in Line 1.")
     # field
     field_spec = strip(lines[2])
@@ -97,9 +97,7 @@ end
 # ---------------- Streaming polynomial parser ----------------
 # Grammar per term:   [±] [int coeff]* [*] (var[^exp] [*])*    until next ±
 # Assumes the .in is fully expanded (no parentheses).
-function parse_poly_line_build(s::String,
-                               R::AbstractAlgebra.MPolyRing,
-                               K, var_index::Dict{String,Int}, p::Int)
+function parse_poly_line_build(s::String, R, K, var_index, p::Integer)
     s = replace(s, " " => "")
     nvars = length(var_index)
     exps  = zeros(Int, nvars)
@@ -161,7 +159,7 @@ end
 
 function parse_polynomials(poly_strs::Vector{String})
     P = Vector{typeof(vars[1])}()
-    vmap = Dict(v => i for (i, v) in enumerate(var_names))
+    vmap = Dict{String,Int}(v => i for (i, v) in enumerate(var_names))
     t0 = time()
     for (k, s) in enumerate(poly_strs)
         try
