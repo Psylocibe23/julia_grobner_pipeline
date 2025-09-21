@@ -2,9 +2,9 @@
 # solve_F4_from_file_parsing.jl — F4 Gröbner basis (DRL) with streaming parser
 ################################################################################
 
-using AlgebraicSolving              # F4, Ideal, normal_form, etc.
-import AbstractAlgebra               # MPolyBuildCtx
-import Nemo                          # GF(p)
+using AlgebraicSolving              # Ideal, groebner_basis, normal_form
+import AbstractAlgebra              # MPolyBuildCtx, polynomial_ring
+import Nemo                         # GF(p)
 using Dates, Printf
 using Base.Filesystem: mkpath, basename, splitext
 
@@ -20,13 +20,19 @@ function parse_args()
     return filename, nthreads
 end
 
-filename, nthreads = parse_args()
+filename, nthreads_cli = parse_args()
 mkpath("logs"); mkpath("results")
+
+# Environment-tunable F4 knobs (with safe defaults)
+const F4_THREADS     = parse(Int,  get(ENV, "F4_THREADS",      string(nthreads_cli)))
+const F4_MAX_PAIRS   = parse(Int,  get(ENV, "F4_MAX_PAIRS",     "6000"))   # cap S-pairs
+const F4_INITIAL_HTS = parse(Int,  get(ENV, "F4_INITIAL_HTS",   "19"))     # smaller hash tables
+const F4_LA_OPTION   = parse(Int,  get(ENV, "F4_LA_OPTION",     "22"))     # memory-friendlier than 44
 
 # ---------------- Input (.in) reader ----------------
 # Line 1: comma-separated variable names
 # Line 2: prime p
-# Line 3+: polynomials (expanded sums of monomials; no parentheses)
+# Line 3+: polynomials (expanded sums; no parentheses)
 function isprime64(n::Integer)::Bool
     n ≤ 1 && return false
     n ≤ 3 && return true
@@ -37,7 +43,7 @@ function isprime64(n::Integer)::Bool
     end
     d = n - 1; s = 0
     while iseven(d); d ÷= 2; s += 1; end
-    function modexp(a,e,m)
+    function modexp(a::Integer,e::Integer,m::Integer)
         a%=m; r=1%m; ee=e
         while ee>0
             (ee&1)==1 && (r=(r*a)%m)
@@ -45,7 +51,7 @@ function isprime64(n::Integer)::Bool
         end
         r
     end
-    function is_witness(a)
+    function is_witness(a::Integer)
         x = modexp(a,d,n)
         (x==1 || x==n-1) && return false
         for _ in 1:(s-1)
@@ -75,7 +81,7 @@ function parse_input_system(path::AbstractString)
     (p ≥ 2 && isprime64(p)) || error("Field characteristic must be prime (got $p).")
     # polys
     poly_strs = String[]
-    for (j, line) in enumerate(lines[3:end])
+    for line in lines[3:end]
         s = strip(line)
         (isempty(s) || startswith(s, "#")) && continue
         push!(poly_strs, s)
@@ -89,15 +95,28 @@ var_names, p, poly_strs = parse_input_system(filename)
 # ---------------- Ring ----------------
 K = Nemo.GF(p)
 R, vars = AbstractAlgebra.polynomial_ring(K, var_names; internal_ordering = :degrevlex)
-# Bind variables into Main so printer matches input names (not strictly needed)
+
+# Bind variables into Main so Meta.parse-based printing would match (not required here)
 for (i, v) in enumerate(var_names)
     @eval Main $(Symbol(v)) = vars[$i]
+end
+
+# ---------------- Optional memory heartbeat ----------------
+@async begin
+    while true
+        rss = try
+            m = match(r"VmRSS:\s+(\d+)\s+kB", read("/proc/self/status", String)); m === nothing ? -1 : parse(Int, m.captures[1])
+        catch; -1; end
+        println("[HEARTBEAT] RSS ≈ $(rss ÷ 1024) MiB  @ ", Dates.format(now(), "HH:MM:ss"))
+        flush(stdout)
+        sleep(300)
+    end
 end
 
 # ---------------- Streaming polynomial parser ----------------
 # Grammar per term:   [±] [int coeff]* [*] (var[^exp] [*])*    until next ±
 # Assumes the .in is fully expanded (no parentheses).
-function parse_poly_line_build(s::String, R, K, var_index, p::Integer)
+function parse_poly_line_build(s::String, R, K, var_index::Dict{String,Int}, p::Integer)
     s = replace(s, " " => "")
     nvars = length(var_index)
     exps  = zeros(Int, nvars)
@@ -116,7 +135,7 @@ function parse_poly_line_build(s::String, R, K, var_index, p::Integer)
         c = 1 % p
         fill!(exps, 0)
 
-        # factors until next +/-
+        # factors until next +/- 
         while i <= L && s[i] != '+' && s[i] != '-'
             if isdigit(s[i])
                 j = i
@@ -126,7 +145,7 @@ function parse_poly_line_build(s::String, R, K, var_index, p::Integer)
                 i = j
                 if i <= L && s[i] == '*'; i += 1; end
             else
-                # variable token
+                # variable token  (letters, digits, underscore)
                 j = i
                 while j <= L && (isletter(s[j]) || isdigit(s[j]) || s[j] == '_'); j += 1; end
                 vname = s[i:j-1]
@@ -149,7 +168,7 @@ function parse_poly_line_build(s::String, R, K, var_index, p::Integer)
 
         coeff = mod(sign * c, p)
         if coeff != 0
-            AbstractAlgebra.push_term!(ctx, K(coeff), copy(exps))  # copy exps, builder stores by ref
+            AbstractAlgebra.push_term!(ctx, K(coeff), copy(exps))
         end
         # do not consume the +/- here; outer loop handles it
     end
@@ -168,7 +187,6 @@ function parse_polynomials(poly_strs::Vector{String})
             @error "Error while parsing polynomial #$k (input line $(k+2))" s
             rethrow(err)
         end
-        # tiny heartbeat for very long inputs
         (k % 50 == 0) && @info "Parsed $k / $(length(poly_strs)) polynomials..."
     end
     @info @sprintf("Parsed %d polynomials in %.3f s", length(poly_strs), time() - t0)
@@ -194,14 +212,21 @@ open(log_file, "w") do logio
             println("Input file: $filename")
             println("Variables: ", join(var_names, ", "))
             println("Order: degrevlex (DRL)")
-            println("Threads requested: $nthreads")
-            println("Number of input polynomials: ", length(polys))
+            println("Threads requested (F4): $F4_THREADS")
+            println("F4 knobs: la_option=$F4_LA_OPTION, initial_hts=$F4_INITIAL_HTS, max_nr_pairs=$F4_MAX_PAIRS")
             println("----------------------------------------------------------------")
             println("Starting F4 (AlgebraicSolving.groebner_basis)...")
             t0 = time()
             G = nothing
             try
-                @time G = groebner_basis(I; la_option=44, nr_thrds = nthreads, info_level = 2, initial_hts = 22, max_nr_pairs = 30000)
+                @time G = groebner_basis(
+                    I;
+                    nr_thrds     = F4_THREADS,
+                    info_level   = 2,
+                    la_option    = F4_LA_OPTION,
+                    initial_hts  = F4_INITIAL_HTS,
+                    max_nr_pairs = F4_MAX_PAIRS,
+                )
             catch err
                 println("\nF4 FAILED:\n$err")
                 rethrow(err)
@@ -210,7 +235,7 @@ open(log_file, "w") do logio
             @printf("F4 wall time: %.3f seconds\n", t1 - t0)
             println("Basis size: ", length(G))
 
-            # (Optional) correctness: each input generator reduces to 0 mod Ideal(G)
+            # (Optional) correctness: reduce generators modulo G
             println("Verifying generators reduce to 0 modulo Ideal(G)...")
             J = Ideal(G)
             for (idx, f) in enumerate(polys)
