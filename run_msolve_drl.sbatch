@@ -4,8 +4,8 @@
 #SBATCH --partition=turing-wide
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=980G
-#SBATCH --time=2-00:00:00
+#SBATCH --mem=12G
+#SBATCH --time=01:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 
