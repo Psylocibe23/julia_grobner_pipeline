@@ -1,0 +1,32 @@
+Bootstrap: docker
+From: debian:12-slim
+
+%labels
+  Name "msolve"
+  Description "msolve inside Apptainer (Debian 12)"
+  URL "https://msolve.lip6.fr"
+
+%post
+  set -eux
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y --no-install-recommends \
+    build-essential git autoconf automake libtool pkg-config ca-certificates \
+    libgmp-dev libmpfr-dev libflint-dev libomp-dev curl wget
+  rm -rf /var/lib/apt/lists/*
+
+  git clone --depth=1 https://github.com/algebraic-solving/msolve.git /opt/msolve-src
+  cd /opt/msolve-src
+  autoreconf -fi || true
+  ./configure --prefix=/opt/msolve --enable-openmp CFLAGS="-O3" CXXFLAGS="-O3"
+  make -j"$(nproc)"
+  make install
+
+  ln -s /opt/msolve/bin/msolve /usr/local/bin/msolve
+
+%environment
+  export PATH=/opt/msolve/bin:$PATH
+  export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+
+%help
+  msolve container. Use: apptainer exec msolve.sif msolve -h
