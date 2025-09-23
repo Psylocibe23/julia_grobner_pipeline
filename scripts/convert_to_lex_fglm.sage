@@ -83,28 +83,36 @@ def read_groebner_basis_file(result_file):
 
     for i, line in enumerate(lines):
         s = line.strip()
+
         if s.startswith("# Variables:"):
             variables = [v.strip() for v in s.split(":", 1)[1].split(",")]
+
+        elif s.startswith("# Field characteristic:"):
+            # e.g. "# Field characteristic: 2"
+            try:
+                field_p = int(s.split(":", 1)[1].strip())
+            except Exception:
+                raise ValueError(f"Could not parse prime from: '{s}'")
+
         elif s.startswith("# Field:"):
+            # e.g. "# Field: GF(65537)" or "# Field: GF(2^n)" → take the base
             try:
                 inside = s.split("GF(", 1)[1].split(")", 1)[0].strip()
-                if "^" in inside:
-                    base, _ = inside.split("^", 1)
-                    field_p = int(base.strip())
-                else:
-                    field_p = int(inside)
+                field_p = int(inside.split("^", 1)[0].strip())
             except Exception:
                 raise ValueError(f"Could not parse field from header line: '{s}'")
+
         elif s.startswith("# Order:"):
             order = s.split(":", 1)[1].strip()
-        elif s.startswith("# --- Groebner basis ---"):
+
+        elif s.startswith("# --- Groebner basis"):
             basis_start = i + 1
             break
 
     if variables is None:
         raise ValueError("Header '# Variables:' not found.")
     if field_p is None:
-        raise ValueError("Header '# Field: GF(p)' not found.")
+        raise ValueError("Field prime not found. Expected '# Field: GF(p)' or '# Field characteristic: p'.")
     if basis_start is None:
         raise ValueError("Marker '# --- Groebner basis ---' not found; cannot read basis.")
 
@@ -115,7 +123,12 @@ def read_groebner_basis_file(result_file):
     if not polys:
         raise ValueError("No polynomials found after the basis marker.")
 
-    return variables, field_p, (order or "UNKNOWN"), polys
+    # If the file didn’t include an order line, default to DRL (your pipeline)
+    if order is None:
+        order = "degrevlex"
+
+    return variables, field_p, order, polys
+
 
 # ================= Shape-position checks =================
 def shape_heuristic(variables, G_lex):

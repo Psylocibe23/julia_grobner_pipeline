@@ -13,7 +13,7 @@ _sage_const_0p6 = RealNumber('0.6'); _sage_const_0 = Integer(0); _sage_const_1 =
 #   last n lines: field equations  x_i^2 + x_i
 #
 # CLASSICAL HFE (char 2):
-#   F(X) uses only exponents 2^i  (linearized) and 2^i+2^j with i<j (true HFE quad),
+#   F(X) uses only exponents 2^i (linearized) and 2^i+2^j with i<j (true HFE quad),
 #   subject to 2^i ≤ D and 2^i + 2^j ≤ D.
 #
 # LOGS:
@@ -21,13 +21,13 @@ _sage_const_0p6 = RealNumber('0.6'); _sage_const_0 = Integer(0); _sage_const_1 =
 #       logs/HFE_n{n}_D{D}_genlog.txt
 #     includes the secret vector as well.
 #
-#   • NEW: Secret log (parse-friendly details for verification)
+#   • Secret log (parse-friendly details for verification)
 #       logs/HFE_n{n}_D{D}_secret.txt
 #     contains:
 #       Field: GF(2^n)
 #       Modulus polynomial: <irreducible poly over GF(2)>
 #       F(X) = <polynomial over GF(2^n)[X]>
-#       A_S =            # matrix block (one row per line)
+#       A_S = # matrix block (one row per line)
 #       [ ... ]
 #       b_S = ( ... )
 #       A_T =
@@ -40,7 +40,7 @@ import sys, os, time
 from random import random
 from sage.all import *
 
-# ---------- Utilities ---------------------------------------------------------
+# ============================ Utilities ======================================
 
 def ensure_dir_for(path):
     """Create parent directory for `path`, if needed."""
@@ -49,7 +49,7 @@ def ensure_dir_for(path):
         os.makedirs(d)
 
 def now_str():
-    """Wall-clock time string for user-facing messages."""
+    """Wall-clock time string for user."""
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
 def log_write(L, s):
@@ -57,15 +57,14 @@ def log_write(L, s):
     if L is not None:
         L.write(s + "\n"); L.flush()
 
-# ---------- HFE univariate over K = GF(2^n) ----------------------------------
+# ====================== HFE univariate over K = GF(2^n) ======================
 
 def random_hfe_polynomial(K, n, D, prob_quad=_sage_const_0p6 , prob_lin=_sage_const_0p6 ,
                           must_have_quad=True, must_have_lin=True):
     """
-    Build F(X) ∈ K[X] with HFE-degree ≤ D using:
+    Build F(X) in K[X] with HFE-degree ≤ D using:
       • linearized terms: X^(2^i) when 2^i ≤ D;
       • TRUE quadratic terms: X^(2^i+2^j) with i<j and 2^i+2^j ≤ D.
-    (We exclude i=j because X^(2^i+2^i) = X^(2^{i+1}) in char 2 → linearized.)
     """
     R = PolynomialRing(K, names=('X',)); (X,) = R._first_ngens(1)
     F = R(_sage_const_0 )
@@ -82,14 +81,14 @@ def random_hfe_polynomial(K, n, D, prob_quad=_sage_const_0p6 , prob_lin=_sage_co
     for i in range(n):
         e_i = _sage_const_1  << i
         if e_i > D: break
-        for j in range(i+_sage_const_1 , n):        # STRICT i<j
+        for j in range(i+_sage_const_1 , n):  # STRICT i<j
             e_ij = e_i + (_sage_const_1  << j)
             if e_ij > D: break
             quad_pairs.append((i, j))
 
     have_quad = False; have_lin = False
 
-    # pick quadratic terms
+    # quadratic terms
     for (i, j) in quad_pairs:
         if random() < prob_quad:
             c = K.random_element()
@@ -97,7 +96,7 @@ def random_hfe_polynomial(K, n, D, prob_quad=_sage_const_0p6 , prob_lin=_sage_co
                 F += c * X**((_sage_const_1  << i) + (_sage_const_1  << j))
                 have_quad = True
 
-    # pick linearized terms
+    # linearized terms
     for i in lin_is:
         if random() < prob_lin:
             c = K.random_element()
@@ -105,7 +104,7 @@ def random_hfe_polynomial(K, n, D, prob_quad=_sage_const_0p6 , prob_lin=_sage_co
                 F += c * X**(_sage_const_1  << i)
                 have_lin = True
 
-    # optional constant
+    # constant
     c0 = K.random_element()
     if c0 != _sage_const_0 :
         F += c0
@@ -122,12 +121,12 @@ def random_hfe_polynomial(K, n, D, prob_quad=_sage_const_0p6 , prob_lin=_sage_co
 
     return F, have_quad, have_lin
 
-# ---------- Project K[ x ] → n coordinates in F2[ x ] ------------------------
+# ================= Project K[x] onto n coordinates in F2[x] ======
 
 def coords_over_F2(poly_Kx, K, a, n, R_F2):
     """
-    Given poly_Kx ∈ K[ x0,...,x{n-1} ], write coefficients in the power basis
-    {1,a,...,a^{n-1}} and return [g_0,...,g_{n-1}] with g_t ∈ F2[ x ].
+    Given poly_Kx in K[x0,...,x{n-1}], write coefficients in the power basis
+    {1,a,...,a^{n-1}} and return [g_0,...,g_{n-1}] with g_t in F2[x]
     """
     coords = [R_F2(_sage_const_0 ) for _ in range(n)]
     for mon, coeff in poly_Kx.dict().items():
@@ -141,9 +140,8 @@ def coords_over_F2(poly_Kx, K, a, n, R_F2):
 
 def boolean_reduce(poly, R):
     """
-    Correct Boolean reduction modulo <x_i^2 - x_i>:
-      for each variable, any exponent e >= 1 collapses to 1 (NOT e mod 2).
-    This keeps x^k = x for k>=1 and preserves quadratic products.
+    for each variable, any exponent e >= 1 collapses to 1.
+    This keeps x^k = x for k>=1 and preserves quadratic products
     """
     terms = {}
     for mon, coeff in poly.dict().items():
@@ -153,11 +151,11 @@ def boolean_reduce(poly, R):
         terms[red_mon] = terms.get(red_mon, R.base_ring()(_sage_const_0 )) + coeff
     return R(terms)
 
-# ---------- Jacobian rank -----------------------------------------------------
+# ================= Jacobian rank ==========================
 
 def jacobian_rank_at(polys, R, x_star):
     """
-    Rank over GF(2) of J = (∂p_i/∂x_j)(x_star), where polys ⊂ R and x_star ∈ (GF(2))^n.
+    Rank over GF(2) of J = (∂p_i/∂x_j)(x_star), where polys in R and x_star in (GF(2))^n
     """
     n = len(polys); F2 = R.base_ring(); xs = R.gens()
     J = Matrix(F2, n, n, _sage_const_0 )
@@ -168,12 +166,11 @@ def jacobian_rank_at(polys, R, x_star):
             J[i, j] = F2(dpoly.subs(subst))
     return J.rank()
 
-# ---------- Secret log writer -------------------------------------------------
+# ================= Secret log writer =========================
 
 def write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, secret_vec):
     """
-    Emit a parse-friendly secret log with the exact objects needed for downstream
-    verification and equivalence checks.
+    Emit a parse-friendly secret log with secret polynomial and affine maps
     """
     ensure_dir_for(secret_logfile)
     with open(secret_logfile, "w") as S:
@@ -194,7 +191,7 @@ def write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, secret_
         # Secret
         S.write("Secret = [" + ", ".join(str(int(b)) for b in secret_vec) + "]\n")
 
-# ---------- Builder: compute in K[x], then project to F2[x] -------------------
+# ================= Builder: compute in K[x], then project to F2[x] =================
 
 def build_and_export_instance(n, D, out_infile, seed=None,
                               prob_quad=_sage_const_0p70 , prob_lin=_sage_const_0p60 ,
@@ -204,15 +201,15 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                               verbose=False):
     """
     Conditions:
-     (i) F has linearized and TRUE quadratic HFE terms (when admissible).
-    (ii) public system has degree ≥ 2 after Boolean reduction.
-   (iii) ∃ x* with Jacobian rank ≥ rank_min (default n-1). If not found but
-         allow_fallback=True, accept the best-rank seen.
+     (i) F has linearized and TRUE quadratic HFE terms 
+    (ii) public system has degree ≥ 2 after Boolean reduction
+   (iii) there exists x* with Jacobian rank ≥ rank_min (default n-1). If not found but
+         allow_fallback=True, accept the best-rank seen
 
     Writes:
       - .in file for the pipeline
       - generation log (logfile)
-      - NEW: secret log (secret_logfile) with F, S, T, secret
+      - secret log (secret_logfile) with F, S, T, secret
     """
     # ---- logging files ----
     L = None
@@ -238,12 +235,12 @@ def build_and_export_instance(n, D, out_infile, seed=None,
         K = GF(_sage_const_2 **n, names=('a',)); (a,) = K._first_ngens(1)# field for HFE
         modulus = K.modulus()
         names = tuple(f"x{i}" for i in range(n))
-        R = PolynomialRing(F2, n, names=names)     # R = F2[x]
-        XK = PolynomialRing(K, n, names=names)     # XK = K[x]
-        x_R  = R.gens()
-        x_K  = XK.gens()
+        R = PolynomialRing(F2, n, names=names)  # R = F2[x]
+        XK = PolynomialRing(K, n, names=names)  # XK = K[x]
+        x_R = R.gens()
+        x_K = XK.gens()
 
-        # Draw F(X) ∈ K[X]
+        # Draw F(X) in K[X]
         F_univar, have_quad, have_lin = random_hfe_polynomial(
             K, n, D, prob_quad=prob_quad, prob_lin=prob_lin,
             must_have_quad=True, must_have_lin=True
@@ -265,7 +262,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             b_S = vector(F2, [F2.random_element() for _ in range(n)])
             A_T = rnd_inv(n, F2)
 
-            # --- Compute S(x) in K[x] cleanly ---
+            # --- Compute S(x) in K[x] ---
             s_vec_K = []
             for k in range(n):
                 expr = XK(_sage_const_0 )
@@ -276,13 +273,13 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                     expr += _sage_const_1 
                 s_vec_K.append(expr)
 
-            # Embed to K via the fixed basis: sK(x) = Σ s_k(x) a^k ∈ K[x]
+            # Embed to K via the fixed basis: sK(x) = sum_k s_k(x) a^k in K[x]
             sK = sum(s_vec_K[k] * (a**k) for k in range(n))
 
-            # Evaluate the HFE univariate: yK(x) = F( sK(x) ) ∈ K[x]
+            # Evaluate the HFE univariate: yK(x) = F( sK(x) ) in K[x]
             yK = F_univar(sK)
 
-            # Project K[x] → n polynomials over F2[x]
+            # Project K[x] to n polynomials over F2[x]
             y_vec_R = coords_over_F2(yK, K, a, n, R)
 
             # Apply output linear map (no constant yet): z0 = A_T * y
@@ -346,7 +343,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                     log_write(L, f"Public degs: {degs}")
                     log_write(L, f"Secret: {list(x_star)}")
 
-                    # Secret log (always)
+                    # Secret log 
                     if secret_logfile is None:
                         secret_logfile = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
                     write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, x_star)
@@ -361,7 +358,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                         "secret_logfile": secret_logfile
                     }
 
-        # If we reached here, no success. Try fallback?
+        # If you reached here, no success. Try fallback
         if allow_fallback and best["rank"] >= _sage_const_0  and best["bundle"] is not None:
             A_S, b_S, A_T, z0_R, x_star, degs = best["bundle"]
             s_star  = A_S * x_star + b_S
@@ -407,7 +404,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
         if L is not None:
             L.close()
 
-# ---------- CLI ----------------------------------------------------------------
+# ================= MAIN ==================================
 
 def main():
     if len(sys.argv) < _sage_const_3 :
@@ -430,16 +427,16 @@ def main():
     else:
         out_infile = auto_out; arg_offset = _sage_const_3 
 
-    seed             = int(sys.argv[arg_offset])     if len(sys.argv) >= arg_offset+_sage_const_1  else None
-    prob_quad        = float(sys.argv[arg_offset+_sage_const_1 ]) if len(sys.argv) >= arg_offset+_sage_const_2  else _sage_const_0p70 
-    prob_lin         = float(sys.argv[arg_offset+_sage_const_2 ]) if len(sys.argv) >= arg_offset+_sage_const_3  else _sage_const_0p60 
-    rank_min_arg     = sys.argv[arg_offset+_sage_const_3 ]        if len(sys.argv) >= arg_offset+_sage_const_4  else None
-    rank_min         = int(rank_min_arg) if rank_min_arg is not None else None
-    allow_fallback   = (sys.argv[arg_offset+_sage_const_4 ].lower() in ("1","true","yes")) if len(sys.argv) >= arg_offset+_sage_const_5  else False
-    max_maps         = int(sys.argv[arg_offset+_sage_const_5 ])   if len(sys.argv) >= arg_offset+_sage_const_6  else _sage_const_20 
+    seed = int(sys.argv[arg_offset]) if len(sys.argv) >= arg_offset+_sage_const_1  else None
+    prob_quad = float(sys.argv[arg_offset+_sage_const_1 ]) if len(sys.argv) >= arg_offset+_sage_const_2  else _sage_const_0p70 
+    prob_lin = float(sys.argv[arg_offset+_sage_const_2 ]) if len(sys.argv) >= arg_offset+_sage_const_3  else _sage_const_0p60 
+    rank_min_arg = sys.argv[arg_offset+_sage_const_3 ] if len(sys.argv) >= arg_offset+_sage_const_4  else None
+    rank_min = int(rank_min_arg) if rank_min_arg is not None else None
+    allow_fallback = (sys.argv[arg_offset+_sage_const_4 ].lower() in ("1","true","yes")) if len(sys.argv) >= arg_offset+_sage_const_5  else False
+    max_maps = int(sys.argv[arg_offset+_sage_const_5 ]) if len(sys.argv) >= arg_offset+_sage_const_6  else _sage_const_20 
     max_secret_tries = int(sys.argv[arg_offset+_sage_const_6 ])   if len(sys.argv) >= arg_offset+_sage_const_7  else _sage_const_2048 
 
-    logname    = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
+    logname = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
     secretlog  = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
 
     print(f"[{now_str()}] Generating classical HFE instance (n={n}, D={D}) ...")
