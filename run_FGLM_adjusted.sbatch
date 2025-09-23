@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=fglm_adj
 #SBATCH --qos=tesi_spreafichi
-#SBATCH --partition=turing-wide,Main,lovelace
+#SBATCH --partition=turing-wide
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1         
 #SBATCH --mem=980G
