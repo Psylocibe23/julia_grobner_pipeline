@@ -48,8 +48,6 @@ def pick_workers(cli_workers=None, max_secret_tries=2048, batch_size=256, n=0):
       - otherwise cap by ceil(max_secret_tries / batch_size)
       - otherwise use SLURM_CPUS_PER_TASK or os.cpu_count()
     """
-    if n and n < 24:
-        return 1
     cap_by_batches = max(1, (max_secret_tries + batch_size - 1) // batch_size)
 
     if cli_workers is not None and not _is_unset(cli_workers):
@@ -701,7 +699,7 @@ def main():
               f"(set HFE_FORCE=1 or pass final 'true' to regenerate)")
         return
 
-    workers = pick_workers(workers_arg, max_secret_tries=max_secret_tries, batch_size=256, n=n)
+    workers = pick_workers(workers_arg, max_secret_tries=max_secret_tries, batch_size=1024, n=n)
 
     logname = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
     secretlog = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
@@ -716,7 +714,7 @@ def main():
         max_maps=max_maps, max_secret_tries=max_secret_tries,
         rank_min=rank_min, allow_fallback=allow_fallback,
         logfile=logname, secret_logfile=secretlog, verbose=False,
-        workers=workers, batch_size=256
+        workers=workers, batch_size=1024
     )
     print(f"[{now_str()}] Log written to: {logname}")
     print(f"[{now_str()}] Secret log written to: {info.get('secret_logfile', secretlog)}")
