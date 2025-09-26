@@ -2,8 +2,6 @@
 #SBATCH --job-name=genhfe
 #SBATCH --output=logs/genhfe_%j.out
 #SBATCH --error=logs/genhfe_%j.err
-#SBATCH --qos=tesi_spreafichi
-#SBATCH --partition=turing-wide
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32     
 #SBATCH --mem=64G
