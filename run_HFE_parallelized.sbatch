@@ -6,15 +6,15 @@
 #SBATCH --partition=turing-wide
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32     
-#SBATCH --mem=128G
-#SBATCH --time=08:00:00
+#SBATCH --mem=64G
+#SBATCH --time=04:00:00
 
 set -euo pipefail
 
 module load sagemath/10.6-singularity
 
 # Usage:
-#   sbatch run_generate_HFE_parallel.sbatch N D [SEED] [PROB_QUAD] [PROB_LIN] [RANK_MIN] [ALLOW_FB] [MAX_MAPS] [MAX_TRIES] [WORKERS] [FORCE]
+#   sbatch run_HFE_parallelized.sbatch N D [SEED] [PROB_QUAD] [PROB_LIN] [RANK_MIN] [ALLOW_FB] [MAX_MAPS] [MAX_TRIES] [WORKERS] [FORCE]
 
 N=${1:-80}
 D=${2:-96}
