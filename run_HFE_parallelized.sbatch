@@ -2,10 +2,11 @@
 #SBATCH --job-name=genhfe
 #SBATCH --output=logs/genhfe_%j.out
 #SBATCH --error=logs/genhfe_%j.err
-#SBATCH --partition=turing-long
+#SBATCH --qos=tesi_spreafichi
+#SBATCH --partition=turing-wide
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8          
-#SBATCH --mem=64G
+#SBATCH --cpus-per-task=32     
+#SBATCH --mem=128G
 #SBATCH --time=08:00:00
 
 set -euo pipefail

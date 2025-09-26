@@ -6,20 +6,10 @@ from sage.all_cmdline import *   # import sage library
 _sage_const_2048 = Integer(2048); _sage_const_256 = Integer(256); _sage_const_0 = Integer(0); _sage_const_24 = Integer(24); _sage_const_1 = Integer(1); _sage_const_0p6 = RealNumber('0.6'); _sage_const_2 = Integer(2); _sage_const_0p70 = RealNumber('0.70'); _sage_const_0p60 = RealNumber('0.60'); _sage_const_20 = Integer(20); _sage_const_16 = Integer(16); _sage_const_1023 = Integer(1023); _sage_const_32 = Integer(32); _sage_const_3 = Integer(3); _sage_const_4 = Integer(4); _sage_const_5 = Integer(5); _sage_const_6 = Integer(6); _sage_const_7 = Integer(7); _sage_const_8 = Integer(8)###############################################################################
 # construct_HFE_parallelized.sage — Classical HFE instance generator for GF(2)
 #
-# - True HFE: F(X) uses only exponents 2^i and 2^i+2^j (i<j), ≤ D
-# - Outputs pipeline .in, a human log, and a secret log (F,S,T,secret)
-# - Speedups:
-#     • Build public system directly in F2[x] via Frobenius (no K[x] blow-up)
-#     • Precompute ∂p_i/∂x_j once per (S,T)
-#     • Parallel secret probing (auto-tuned worker count) with early cancel
-# - Safety:
-#     • Skips if output already exists unless forced
-#     • Cancels outstanding workers immediately on success
-#
-# Optional dev check:
-#   Set HFE_SANITY=1 in env to cross-check fast path vs slow path on random
-#   evaluation points (costly; use sparingly just to reassure yourself).
+# - HFE: F(X) uses only exponents 2^i and 2^i+2^j (i<j), ≤ D
+# - Outputs pipeline .in, a public log, and a secret log (F,S,T,secret)
 ###############################################################################
+
 
 import sys, os, time, multiprocessing
 import random as pyrand
@@ -88,22 +78,29 @@ def pick_workers(cli_workers=None, max_secret_tries=_sage_const_2048 , batch_siz
 # ====================== HFE univariate over K = GF(2^n) ======================
 
 def random_hfe_polynomial(K, n, D, prob_quad=_sage_const_0p6 , prob_lin=_sage_const_0p6 ,
-                          must_have_quad=True, must_have_lin=True):
+                          must_have_quad=True, must_have_lin=True,
+                          enforce_exact_degree=True, strict=True):
     """
-    F(X) ∈ K[X], HFE-degree ≤ D.
-      • linearized: X^(2^i) with 2^i ≤ D
-      • true quad : X^(2^i+2^j), i<j, ≤ D  (i=j collapses to linearized in char 2)
+    Build F(X) in K[X] with HFE-degree <= D using:
+      • linearized terms: X^(2^i) when 2^i <= D;
+      • TRUE quadratic terms: X^(2^i+2^j) with i<j and 2^i+2^j <= D.
+
+    If enforce_exact_degree=True, we force deg(F) == D by inserting
+    the monomial X^D with a nonzero coefficient, provided D is admissible
+    (power of two, or sum of two distinct powers of two). If D is not
+    admissible and strict=True, raise; if strict=False, we do NOT modify F.
     """
     R = PolynomialRing(K, names=('X',)); (X,) = R._first_ngens(1)
     F = R(_sage_const_0 )
 
     # admissible 2^i
-    lin_is, e, i = [], _sage_const_1 , _sage_const_0 
+    lin_is = []
+    e = _sage_const_1 ; i = _sage_const_0 
     while i < n and e <= D:
         lin_is.append(i)
         i += _sage_const_1 ; e <<= _sage_const_1 
 
-    # admissible 2^i + 2^j, i<j
+    # admissible 2^i+2^j with i<j
     quad_pairs = []
     for i in range(n):
         e_i = _sage_const_1  << i
@@ -115,17 +112,24 @@ def random_hfe_polynomial(K, n, D, prob_quad=_sage_const_0p6 , prob_lin=_sage_co
 
     have_quad = False; have_lin = False
 
-    # true quadratic terms
+    # helper: pick nonzero coeff in K
+    def nzK():
+        c = K.random_element()
+        while c == _sage_const_0 :
+            c = K.random_element()
+        return c
+
+    # random quadratics
     for (i, j) in quad_pairs:
-        if pyrand.random() < prob_quad:
+        if random() < prob_quad:
             c = K.random_element()
             if c != _sage_const_0 :
                 F += c * X**((_sage_const_1  << i) + (_sage_const_1  << j))
                 have_quad = True
 
-    # linearized terms
+    # random linearized
     for i in lin_is:
-        if pyrand.random() < prob_lin:
+        if random() < prob_lin:
             c = K.random_element()
             if c != _sage_const_0 :
                 F += c * X**(_sage_const_1  << i)
@@ -136,29 +140,57 @@ def random_hfe_polynomial(K, n, D, prob_quad=_sage_const_0p6 , prob_lin=_sage_co
     if c0 != _sage_const_0 :
         F += c0
 
-    # enforce at least one of each (if admissible)
-    if must_have_quad and not have_quad and quad_pairs:
+    # ensure we have at least one of each type if admissible
+    if must_have_quad and (not have_quad) and quad_pairs:
         i, j = quad_pairs[_sage_const_0 ]
         F += K(_sage_const_1 ) * X**((_sage_const_1  << i) + (_sage_const_1  << j))
         have_quad = True
-    if must_have_lin and not have_lin and lin_is:
+    if must_have_lin and (not have_lin) and lin_is:
         i = lin_is[_sage_const_0 ]
         F += K(_sage_const_1 ) * X**(_sage_const_1  << i)
         have_lin = True
 
+    # === enforce top degree EXACTLY D ===
+    if enforce_exact_degree:
+        # test if D is power of two
+        def is_pow2(t): return t > _sage_const_0  and (t & (t - _sage_const_1 )) == _sage_const_0 
+        if is_pow2(D):
+            i = D.bit_length() - _sage_const_1 
+            # make sure coeff of X^(2^i) is nonzero
+            if F.monomial_coefficient(X**D) == _sage_const_0 :
+                F += nzK() * X**D
+        else:
+            # check if D = 2^i + 2^j with i<j
+            bits = []
+            tmp = D; pos = _sage_const_0 
+            while tmp:
+                if (tmp & _sage_const_1 ) != _sage_const_0 :
+                    bits.append(pos)
+                tmp >>= _sage_const_1 ; pos += _sage_const_1 
+            if len(bits) == _sage_const_2  and bits[_sage_const_0 ] < bits[_sage_const_1 ]:
+                i, j = bits
+                if F.monomial_coefficient(X**D) == _sage_const_0 :
+                    F += nzK() * X**D
+                # and mark we indeed have a quad
+                have_quad = True
+            else:
+                if strict:
+                    raise ValueError(f"D={D} is not admissible for HFE (must be 2^i or 2^i+2^j).")
+                # else: do nothing (leave degree <= D)
     return F, have_quad, have_lin
 
-# =================== Frobenius-aware fast public builder =====================
+
+# =================== Frobenius fast public builder =====================
 
 def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
     """
-    Build y(x) ∈ K^n with components in F2[x] directly, using Frobenius:
-      s(x) = c0 + sum_v c_v x_v,  c_• ∈ K determined by A_S,b_S and basis {a^k}
-      For term X^{2^i}:      s^{2^i} = c0^{2^i} + sum_v (c_v^{2^i}) x_v
-      For term X^{2^i+2^j}:  expand s^{2^i} * s^{2^j} into const/linear/quad in x.
-    Split each K-coefficient onto the power basis to fill the n coordinates.
+    Build y(x) in K^n with components in F2[x] directly, using Frobenius:
+      s(x) = c0 + sum_v c_v x_v,  c_• in K determined by A_S,b_S and basis {a^k}
+      For term X^{2^i}: s^{2^i} = c0^{2^i} + sum_v (c_v^{2^i}) x_v
+      For term X^{2^i+2^j}: expand s^{2^i} * s^{2^j} into const/linear/quad in x
+    Split each K-coefficient onto the power basis to fill the n coordinates
 
-    Returns list y[0..n-1] ⊂ F2[x].
+    Returns list y[0..n-1] contained in F2[x].
     """
     F2 = R.base_ring()
     x = R.gens()
@@ -187,7 +219,7 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
             val = val**_sage_const_2 
             c_pow[t][i] = val
 
-    # Accumulators for y ∈ K^n but stored as F2[x] polys via basis splitting
+    # Accumulators for y in K^n but stored as F2[x] polys via basis splitting
     y = [R(_sage_const_0 ) for _ in range(n)]
     zero_mon = tuple(_sage_const_0  for _ in range(n))
 
@@ -209,7 +241,7 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
             add_Kcoef_mon(Kcoef, zero_mon)
             continue
 
-        # linearized 2^i?
+        # linearized 2^i
         if (eX & (eX - _sage_const_1 )) == _sage_const_0 :  # power of two
             i = eX.bit_length() - _sage_const_1 
             c0i = c_pow[i][_sage_const_0 ]
@@ -265,7 +297,7 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
 
     return y
 
-# ================= Project K[x] → n coordinates in F2[x] (slow; for sanity) ==
+# ================= Project K[x] onto n coordinates in F2[x] (slow; for sanity) ==
 
 def coords_over_F2(poly_Kx, K, a, n, R_F2):
     coords = [R_F2(_sage_const_0 ) for _ in range(n)]
@@ -327,8 +359,8 @@ _GLOBALS = {"derivs": None, "R": None, "n": None}
 
 def _install_worker_state(derivs, R, n):
     _GLOBALS["derivs"] = derivs
-    _GLOBALS["R"]      = R
-    _GLOBALS["n"]      = n
+    _GLOBALS["R"] = R
+    _GLOBALS["n"] = n
 
 def _probe_batch(batch_size, rank_min, seed=None):
     if seed is not None:
@@ -394,7 +426,10 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             K, n, D, prob_quad=prob_quad, prob_lin=prob_lin,
             must_have_quad=True, must_have_lin=True
         )
+        if F_univar.degree() != D:
+            raise RuntimeError(f"Internal error: deg(F)={F_univar.degree()} != D={D}")
         log_write(L, f"F has true quadratic? {have_quad}; linearized? {have_lin}")
+
 
         def rnd_inv(n, F2):
             while True:
@@ -404,7 +439,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
 
         best = {"rank": -_sage_const_1 , "bundle": None}  # (A_S,b_S,A_T,z0_R,x_star,degs)
 
-        # Compute worker count HERE with auto-tuning
+        # Compute worker count 
         W = pick_workers(workers, max_secret_tries=max_secret_tries, batch_size=batch_size, n=n)
         if L: log_write(L, f"Workers: {W}   (batch_size per task: {batch_size})")
 
@@ -436,7 +471,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                 log_write(L, f"[map {amap}] skipped: maxdeg < 2")
                 continue
 
-            # ---------- Optional sanity: compare with slow path on random points ----------
+            # ---------- Optional sanity ----------
             if os.environ.get("HFE_SANITY") == "1":
                 s_vec_K = []
                 for k in range(n):
@@ -468,9 +503,9 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             _install_worker_state(derivs, R, n)
 
             remaining = max_secret_tries
-            success   = None           # (x_tuple, rankJ)
+            success = None  # (x_tuple, rankJ)
             best_rank_seen = -_sage_const_1 
-            best_point     = None
+            best_point = None
 
             if W <= _sage_const_1 :
                 t = _sage_const_0 
@@ -653,16 +688,16 @@ def main():
     else:
         out_infile = auto_out; arg_offset = _sage_const_3 
 
-    seed             = _parse_opt(sys.argv, arg_offset+_sage_const_0 , int,   None)
-    prob_quad        = _parse_opt(sys.argv, arg_offset+_sage_const_1 , float, _sage_const_0p70 )
-    prob_lin         = _parse_opt(sys.argv, arg_offset+_sage_const_2 , float, _sage_const_0p60 )
-    rank_min_arg     = sys.argv[arg_offset+_sage_const_3 ] if len(sys.argv) > arg_offset+_sage_const_3  else None
-    rank_min         = None if _is_unset(rank_min_arg) else int(rank_min_arg)
-    allow_fallback   = _parse_bool(sys.argv[arg_offset+_sage_const_4 ] if len(sys.argv) > arg_offset+_sage_const_4  else None, False)
-    max_maps         = _parse_opt(sys.argv, arg_offset+_sage_const_5 , int,   _sage_const_20 )
+    seed = _parse_opt(sys.argv, arg_offset+_sage_const_0 , int,   None)
+    prob_quad = _parse_opt(sys.argv, arg_offset+_sage_const_1 , float, _sage_const_0p70 )
+    prob_lin = _parse_opt(sys.argv, arg_offset+_sage_const_2 , float, _sage_const_0p60 )
+    rank_min_arg = sys.argv[arg_offset+_sage_const_3 ] if len(sys.argv) > arg_offset+_sage_const_3  else None
+    rank_min = None if _is_unset(rank_min_arg) else int(rank_min_arg)
+    allow_fallback = _parse_bool(sys.argv[arg_offset+_sage_const_4 ] if len(sys.argv) > arg_offset+_sage_const_4  else None, False)
+    max_maps = _parse_opt(sys.argv, arg_offset+_sage_const_5 , int,   _sage_const_20 )
     max_secret_tries = _parse_opt(sys.argv, arg_offset+_sage_const_6 , int,   _sage_const_2048 )
-    workers_arg      = sys.argv[arg_offset+_sage_const_7 ] if len(sys.argv) > arg_offset+_sage_const_7  else None
-    force_arg        = sys.argv[arg_offset+_sage_const_8 ] if len(sys.argv) > arg_offset+_sage_const_8  else None
+    workers_arg = sys.argv[arg_offset+_sage_const_7 ] if len(sys.argv) > arg_offset+_sage_const_7  else None
+    force_arg = sys.argv[arg_offset+_sage_const_8 ] if len(sys.argv) > arg_offset+_sage_const_8  else None
 
     force = _parse_bool(force_arg, False) or _parse_bool(os.environ.get("HFE_FORCE"), False)
 
@@ -673,7 +708,7 @@ def main():
 
     workers = pick_workers(workers_arg, max_secret_tries=max_secret_tries, batch_size=_sage_const_256 , n=n)
 
-    logname   = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
+    logname = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
     secretlog = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
 
     print(f"[{now_str()}] Generating classical HFE instance (n={n}, D={D}) ...")
@@ -688,7 +723,7 @@ def main():
         logfile=logname, secret_logfile=secretlog, verbose=False,
         workers=workers, batch_size=_sage_const_256 
     )
-    print(f"[{now_str()}] Log written to:        {logname}")
+    print(f"[{now_str()}] Log written to: {logname}")
     print(f"[{now_str()}] Secret log written to: {info.get('secret_logfile', secretlog)}")
     print(f"[{now_str()}] P(x*)=0: {info['ok_zero']}, rank(J_P(x*))={info['rankJ']}")
 
