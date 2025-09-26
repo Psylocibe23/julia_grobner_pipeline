@@ -116,7 +116,7 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
 
     # random quadratics
     for (i, j) in quad_pairs:
-        if random() < prob_quad:
+        if pyrand.random() < prob_quad:
             c = K.random_element()
             if c != 0:
                 F += c * X**((1 << i) + (1 << j))
@@ -124,7 +124,7 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
 
     # random linearized
     for i in lin_is:
-        if random() < prob_lin:
+        if pyrand.random() < prob_lin:
             c = K.random_element()
             if c != 0:
                 F += c * X**(1 << i)
