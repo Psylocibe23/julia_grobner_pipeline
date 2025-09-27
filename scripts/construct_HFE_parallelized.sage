@@ -276,6 +276,71 @@ def boolean_reduce(poly, R):
 
 # ================= Jacobian helpers: precompute once per (S,T) ================
 
+# ---- Fast GF(2) Jacobian via bitmasks (for Boolean polys of total degree ≤ 2) ----
+def _build_jacobian_bitmasks(polys, R):
+    """For each poly p_i, return (lin_mask_i, quad_rows_i),
+       where lin_mask_i is an n-bit int with bit j set iff x_j appears linearly in p_i,
+       and quad_rows_i[j] is an n-bit int with bit u set iff coefficient of x_j*x_u is 1."""
+    n = len(R.gens())
+    out = []
+    for p in polys:
+        lin_mask = 0
+        quad_rows = [0] * n
+        for mon, coeff in p.dict().items():
+            if coeff == 0:
+                continue
+            idxs = [t for t, e in enumerate(mon) if e]  # after boolean_reduce, e∈{0,1}
+            if not idxs:
+                continue  # constants vanish under derivative
+            if len(idxs) == 1:
+                j = idxs[0]
+                lin_mask |= (1 << j)
+            elif len(idxs) == 2:
+                u, v = idxs
+                if u != v:
+                    quad_rows[u] |= (1 << v)
+                    quad_rows[v] |= (1 << u)
+            # degree>2 shouldn't appear; ignore if any
+        out.append((lin_mask, quad_rows))
+    return out
+
+def _gf2_rank_from_bitrows(bitrows, n):
+    rows = bitrows[:]
+    rank = 0
+    for col in range(n):
+        mask = 1 << col
+        piv = None
+        for r in range(rank, n):
+            if rows[r] & mask:
+                piv = r; break
+        if piv is None:
+            continue
+        rows[rank], rows[piv] = rows[piv], rows[rank]
+        pivrow = rows[rank]
+        for r in range(n):
+            if r != rank and (rows[r] & mask):
+                rows[r] ^= pivrow
+        rank += 1
+    return rank
+
+def jacobian_rank_bitset(precomp, x_tuple):
+    n = len(x_tuple)
+    xmask = 0
+    for j, b in enumerate(x_tuple):
+        if b: xmask |= (1 << j)
+
+    bitrows = []
+    for lin_mask, quad_rows in precomp:
+        rowmask = 0
+        for j in range(n):
+            val = (lin_mask >> j) & 1
+            val ^= (quad_rows[j] & xmask).bit_count() & 1
+            if val: rowmask |= (1 << j)
+        bitrows.append(rowmask)
+
+    return _gf2_rank_from_bitrows(bitrows, n)
+
+
 def precompute_jacobian_derivatives(polys, R):
     xs = R.gens()
     n = len(xs)
@@ -316,34 +381,28 @@ def write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, secret_
 
 # ================= Parallel secret probing (via fork) =========================
 
-_GLOBALS = {"derivs": None, "R": None, "n": None}
+_GLOBALS = {"bitJ": None, "n": None}
 
-def _install_worker_state(derivs, R, n):
-    _GLOBALS["derivs"] = derivs
-    _GLOBALS["R"] = R
+def _install_worker_state(bitJ, n):
+    _GLOBALS["bitJ"] = bitJ
     _GLOBALS["n"] = n
 
 def _probe_batch(batch_size, rank_min, seed=None):
     if seed is not None:
         pyrand.seed(seed)
-
-    derivs = _GLOBALS["derivs"]; R = _GLOBALS["R"]; n = _GLOBALS["n"]
-    if derivs is None or R is None or n is None:
+    bitJ = _GLOBALS["bitJ"]; n = _GLOBALS["n"]
+    if bitJ is None or n is None:
         return {"found": False, "best_rank": -1, "best_x": None}
 
-    best_rank = -1
-    best_x    = None
-
+    best_rank = -1; best_x = None
     for _ in range(batch_size):
         x_tuple = tuple(pyrand.getrandbits(1) for _ in range(n))
-        rankJ = jacobian_rank_at_from_derivs(derivs, R, x_tuple)
-
+        rankJ = jacobian_rank_bitset(bitJ, x_tuple)
         if rankJ > best_rank:
             best_rank, best_x = rankJ, x_tuple
         if rankJ >= rank_min:
             return {"found": True, "x": x_tuple, "rank": rankJ,
                     "best_rank": best_rank, "best_x": best_x}
-
     return {"found": False, "best_rank": best_rank, "best_x": best_x}
 
 # ========================= Builder ============================================
@@ -459,8 +518,9 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                 log_write(L, f"[map {amap}] SANITY: fast public == slow public on 16 random points")
 
             # ---------- Jacobian precompute + parallel probing ----------
-            derivs = precompute_jacobian_derivatives(z0_R, R)
-            _install_worker_state(derivs, R, n)
+            bitJ = _build_jacobian_bitmasks(z0_R, R)
+            _install_worker_state(bitJ, n)
+
 
             remaining = max_secret_tries
             success = None  # (x_tuple, rankJ)
