@@ -698,8 +698,8 @@ def main():
         print(f"[{now_str()}] Found existing instance: {out_infile} — skipping. "
               f"(set HFE_FORCE=1 or pass final 'true' to regenerate)")
         return
-
-    workers = pick_workers(workers_arg, max_secret_tries=max_secret_tries, batch_size=1024, n=n)
+    batch_size = int(os.environ.get("HFE_BATCH_SIZE", "128"))
+    workers = pick_workers(workers_arg, max_secret_tries=max_secret_tries, batch_size=batch_size, n=n)
 
     logname = os.path.join("logs", f"HFE_n{n}_D{D}_genlog.txt")
     secretlog = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
@@ -714,7 +714,7 @@ def main():
         max_maps=max_maps, max_secret_tries=max_secret_tries,
         rank_min=rank_min, allow_fallback=allow_fallback,
         logfile=logname, secret_logfile=secretlog, verbose=False,
-        workers=workers, batch_size=1024
+        workers=workers, batch_size=batch_size
     )
     print(f"[{now_str()}] Log written to: {logname}")
     print(f"[{now_str()}] Secret log written to: {info.get('secret_logfile', secretlog)}")
