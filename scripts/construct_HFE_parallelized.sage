@@ -282,13 +282,18 @@ def precompute_jacobian_derivatives(polys, R):
     return [[polys[i].derivative(xs[j]) for j in range(n)] for i in range(n)]
 
 def jacobian_rank_at_from_derivs(derivs, R, x_star):
-    F2 = R.base_ring(); xs = R.gens(); n = len(xs)
-    subst = {xs[j]: F2(int(x_star[j])) for j in range(n)}
+    F2 = R.base_ring()
+    # Build a tuple of F2 values once; evaluation by position is MUCH faster than subs(dict)
+    vals = tuple(F2(int(b)) for b in x_star)
+    n = len(vals)
     J = Matrix(F2, n, n)
     for i in range(n):
+        di = derivs[i]
         for j in range(n):
-            J[i, j] = F2(derivs[i][j].subs(subst))
+            # evaluate derivative polynomial at the point via positional args
+            J[i, j] = di[j](*vals)
     return J.rank()
+
 
 # ============================== Secret log ====================================
 
