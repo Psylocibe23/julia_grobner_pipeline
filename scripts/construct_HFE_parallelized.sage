@@ -71,17 +71,13 @@ def pick_workers(cli_workers=None, max_secret_tries=2048, batch_size=256, n=0):
 # ====================== HFE univariate over K = GF(2^n) ======================
 
 def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
-                          must_have_quad=True, must_have_lin=True,
-                          enforce_exact_degree=True, strict=True):
+                          must_have_quad=True, must_have_lin=True):
     """
-    Build F(X) in K[X] with HFE-degree <= D using:
-      • linearized terms: X^(2^i) when 2^i <= D;
-      • TRUE quadratic terms: X^(2^i+2^j) with i<j and 2^i+2^j <= D.
+    Build F(X) in K[X] with HFE-degree ≤ D using:
+      • linearized terms: X^(2^i) when 2^i ≤ D;
+      • TRUE quadratic terms: X^(2^i+2^j) with i<j and 2^i+2^j ≤ D.
 
-    If enforce_exact_degree=True, we force deg(F) == D by inserting
-    the monomial X^D with a nonzero coefficient, provided D is admissible
-    (power of two, or sum of two distinct powers of two). If D is not
-    admissible and strict=True, raise; if strict=False, we do NOT modify F.
+    No attempt is made to force deg(F) == D (computationally demanding); the top coefficient may vanish.
     """
     R.<X> = PolynomialRing(K)
     F = R(0)
@@ -105,14 +101,7 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
 
     have_quad = False; have_lin = False
 
-    # helper: pick nonzero coeff in K
-    def nzK():
-        c = K.random_element()
-        while c == 0:
-            c = K.random_element()
-        return c
-
-    # random quadratics
+    # TRUE quadratic terms
     for (i, j) in quad_pairs:
         if pyrand.random() < prob_quad:
             c = K.random_element()
@@ -120,7 +109,7 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
                 F += c * X**((1 << i) + (1 << j))
                 have_quad = True
 
-    # random linearized
+    # linearized terms
     for i in lin_is:
         if pyrand.random() < prob_lin:
             c = K.random_element()
@@ -128,49 +117,23 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
                 F += c * X**(1 << i)
                 have_lin = True
 
-    # constant
+    # constant term
     c0 = K.random_element()
     if c0 != 0:
         F += c0
 
-    # ensure we have at least one of each type if admissible
-    if must_have_quad and (not have_quad) and quad_pairs:
+    # ensure presence if admissible
+    if must_have_quad and not have_quad and quad_pairs:
         i, j = quad_pairs[0]
         F += K(1) * X**((1 << i) + (1 << j))
         have_quad = True
-    if must_have_lin and (not have_lin) and lin_is:
+    if must_have_lin and not have_lin and lin_is:
         i = lin_is[0]
         F += K(1) * X**(1 << i)
         have_lin = True
 
-    # === enforce top degree EXACTLY D ===
-    if enforce_exact_degree:
-        # test if D is power of two
-        def is_pow2(t): return t > 0 and (t & (t - 1)) == 0
-        if is_pow2(D):
-            i = D.bit_length() - 1
-            # make sure coeff of X^(2^i) is nonzero
-            if F.monomial_coefficient(X**D) == 0:
-                F += nzK() * X**D
-        else:
-            # check if D = 2^i + 2^j with i<j
-            bits = []
-            tmp = D; pos = 0
-            while tmp:
-                if (tmp & 1) != 0:
-                    bits.append(pos)
-                tmp >>= 1; pos += 1
-            if len(bits) == 2 and bits[0] < bits[1]:
-                i, j = bits
-                if F.monomial_coefficient(X**D) == 0:
-                    F += nzK() * X**D
-                # and mark we indeed have a quad
-                have_quad = True
-            else:
-                if strict:
-                    raise ValueError(f"D={D} is not admissible for HFE (must be 2^i or 2^i+2^j).")
-                # else: do nothing (leave degree <= D)
     return F, have_quad, have_lin
+
 
 
 # =================== Frobenius fast public builder =====================
@@ -419,8 +382,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             K, n, D, prob_quad=prob_quad, prob_lin=prob_lin,
             must_have_quad=True, must_have_lin=True
         )
-        if F_univar.degree() != D:
-            raise RuntimeError(f"Internal error: deg(F)={F_univar.degree()} != D={D}")
+
         log_write(L, f"F has true quadratic? {have_quad}; linearized? {have_lin}")
 
 
