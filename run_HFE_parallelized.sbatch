@@ -2,13 +2,15 @@
 #SBATCH --job-name=genhfe
 #SBATCH --output=logs/genhfe_%j.out
 #SBATCH --error=logs/genhfe_%j.err
+#SBATCH --qos=tesi_spreafichi
+#SBATCH --partition=turing-wide
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32     
-#SBATCH --mem=64G
-#SBATCH --time=04:00:00
+#SBATCH --mem=128G
+#SBATCH --time=12:00:00
 
 set -euo pipefail
-
+unset HFE_SANITY 
 module load sagemath/10.6-singularity
 
 # Usage:
