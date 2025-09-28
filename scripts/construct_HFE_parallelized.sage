@@ -334,7 +334,7 @@ def jacobian_rank_bitset(precomp, x_tuple):
         rowmask = 0
         for j in range(n):
             val = (lin_mask >> j) & 1
-            val ^= (quad_rows[j] & xmask).bit_count() & 1
+            val ^= (_popcount_int(int(quad_rows[j]) & xmask) & 1)
             if val: rowmask |= (1 << j)
         bitrows.append(rowmask)
 
@@ -539,12 +539,25 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             bitJ = _build_jacobian_bitmasks(z0_R, R)
             _install_worker_state(bitJ, n)
 
+            def _popcount_int(x):
+            # Always use Python int, which supports big integers
+            try:
+                return int(x).bit_count()    # Py3.8+
+            except AttributeError:
+                # Fallback if bit_count() unavailable
+                v = int(x)
+                c = 0
+                while v:
+                    v &= v - 1
+                    c += 1
+                return c
+
             # ---- quick quality gate on the Jacobian structure ----
             def _row_weight(lin_mask, quad_rows):
-                m = lin_mask
-                for r in quad_rows:
-                    m |= r                 # bitwise OR (not sum)
-                return m.bit_count()
+            m = int(lin_mask)
+            for r in quad_rows:
+                m |= int(r)                  # force Python int OR
+            return _popcount_int(m)
 
             min_avg = float(os.environ.get("HFE_MIN_AVG_ROW_W", "2.0"))
             avg_row_w = sum(_row_weight(lin, qrows) for (lin, qrows) in bitJ) / float(n)
