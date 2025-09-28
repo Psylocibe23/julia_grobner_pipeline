@@ -468,15 +468,19 @@ def build_and_export_instance(n, D, out_infile, seed=None,
         for amap in range(1, max_maps+1):
             A_S = rnd_inv(n, F2)
             b_S = vector(F2, [F2.random_element() for _ in range(n)])
+            # Build y(x) once per S (depends only on A_S, b_S)
+            log_write(L, f"[map {amap}] building public polynomials via Frobenius fast path ...")
+            t0 = time.time()
+            y_vec_R = fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D)
             # Try a few A_T draws; keep the first one that yields degree ≥ 2 after Boolean reduction
             AT_RETRIES = int(os.environ.get("HFE_AT_RETRIES", "8"))
             z0_R = None
             degs = None
             chosen_A_T = None
-            
+
             for at_try in range(1, AT_RETRIES + 1):
                 A_T_try = rnd_inv(n, F2)
-            
+
                 z0_R_try = []
                 for i in range(n):
                     acc = R(0)
@@ -484,25 +488,25 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                         if int(A_T_try[i, j]) != 0:
                             acc += y_vec_R[j]
                     z0_R_try.append(boolean_reduce(acc, R))
-            
+
                 degs_try = [p.total_degree() for p in z0_R_try]
                 maxdeg_try = max(degs_try) if degs_try else -1
-            
+
                 if maxdeg_try >= 2:
                     z0_R = z0_R_try
                     degs = degs_try
                     chosen_A_T = A_T_try
                     break
-            
+
             if z0_R is None:
                 log_write(L, f"[map {amap}] all {AT_RETRIES} A_T draws gave maxdeg<2 — resampling S")
                 continue
-            
+
             # use the chosen A_T for the rest of the map
             A_T = chosen_A_T
             log_write(L, f"[map {amap}] public system built in {time.time()-t0:.2f}s")
             log_write(L, f"[map {amap}] public max degree after Boolean: {max(degs)}")
-            
+
 
             # ---------- Optional sanity ----------
             if os.environ.get("HFE_SANITY") == "1":
