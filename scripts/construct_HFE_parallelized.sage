@@ -405,6 +405,7 @@ def _probe_batch(batch_size, rank_min, seed=None):
                     "best_rank": best_rank, "best_x": best_x}
     return {"found": False, "best_rank": best_rank, "best_x": best_x}
 
+
 # ========================= Builder ============================================
 
 def build_and_export_instance(n, D, out_infile, seed=None,
@@ -414,6 +415,8 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                               logfile=None, secret_logfile=None,
                               verbose=False, workers=None, batch_size=256):
 
+    start_time = time.time()
+    soft_budget = int(os.environ.get("HFE_SOFT_TIMEOUT_SEC", "0"))  # 0 = off
     L = None
     if logfile:
         ensure_dir_for(logfile)
@@ -465,30 +468,41 @@ def build_and_export_instance(n, D, out_infile, seed=None,
         for amap in range(1, max_maps+1):
             A_S = rnd_inv(n, F2)
             b_S = vector(F2, [F2.random_element() for _ in range(n)])
-            A_T = rnd_inv(n, F2)
-
-            # ---------- FAST public build via Frobenius ----------
-            log_write(L, f"[map {amap}] building public polynomials via Frobenius fast path ...")
-            t0 = time.time()
-            y_vec_R = fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D)
-
-            # z0 = A_T * y (no constant yet), then boolean-reduce
-            z0_R = []
-            for i in range(n):
-                acc = R(0)
-                for j in range(n):
-                    if int(A_T[i, j]) != 0:
-                        acc += y_vec_R[j]
-                z0_R.append(boolean_reduce(acc, R))
-
-            log_write(L, f"[map {amap}] public system built in {time.time()-t0:.2f}s")
-            degs = [p.total_degree() for p in z0_R]
-            maxdeg = max(degs) if degs else -1
-            log_write(L, f"[map {amap}] public max degree after Boolean: {maxdeg}")
-
-            if maxdeg < 2:
-                log_write(L, f"[map {amap}] skipped: maxdeg < 2")
+            # Try a few A_T draws; keep the first one that yields degree ≥ 2 after Boolean reduction
+            AT_RETRIES = int(os.environ.get("HFE_AT_RETRIES", "8"))
+            z0_R = None
+            degs = None
+            chosen_A_T = None
+            
+            for at_try in range(1, AT_RETRIES + 1):
+                A_T_try = rnd_inv(n, F2)
+            
+                z0_R_try = []
+                for i in range(n):
+                    acc = R(0)
+                    for j in range(n):
+                        if int(A_T_try[i, j]) != 0:
+                            acc += y_vec_R[j]
+                    z0_R_try.append(boolean_reduce(acc, R))
+            
+                degs_try = [p.total_degree() for p in z0_R_try]
+                maxdeg_try = max(degs_try) if degs_try else -1
+            
+                if maxdeg_try >= 2:
+                    z0_R = z0_R_try
+                    degs = degs_try
+                    chosen_A_T = A_T_try
+                    break
+            
+            if z0_R is None:
+                log_write(L, f"[map {amap}] all {AT_RETRIES} A_T draws gave maxdeg<2 — resampling S")
                 continue
+            
+            # use the chosen A_T for the rest of the map
+            A_T = chosen_A_T
+            log_write(L, f"[map {amap}] public system built in {time.time()-t0:.2f}s")
+            log_write(L, f"[map {amap}] public max degree after Boolean: {max(degs)}")
+            
 
             # ---------- Optional sanity ----------
             if os.environ.get("HFE_SANITY") == "1":
@@ -520,6 +534,20 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             # ---------- Jacobian precompute + parallel probing ----------
             bitJ = _build_jacobian_bitmasks(z0_R, R)
             _install_worker_state(bitJ, n)
+
+            # ---- quick quality gate on the Jacobian structure ----
+            def _row_weight(lin_mask, quad_rows):
+                m = lin_mask
+                for r in quad_rows:
+                    m |= r                 # bitwise OR (not sum)
+                return m.bit_count()
+
+            min_avg = float(os.environ.get("HFE_MIN_AVG_ROW_W", "2.0"))
+            avg_row_w = sum(_row_weight(lin, qrows) for (lin, qrows) in bitJ) / float(n)
+            if avg_row_w < min_avg:
+                log_write(L, f"[map {amap}] gate: avg row weight {avg_row_w:.2f} < {min_avg:.2f} — resampling map")
+                continue
+
 
 
             remaining = max_secret_tries
@@ -591,6 +619,36 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             if best_rank_seen > best["rank"]:
                 best["rank"]   = best_rank_seen
                 best["bundle"] = (A_S, b_S, A_T, z0_R, vector(F2, best_point) if best_point else None, degs)
+            # Emit best-available instance if we ran out of time
+            if soft_budget and (time.time() - start_time) >= soft_budget and allow_fallback and best["bundle"] is not None:
+                A_S, b_S, A_T, z0_R_best, x_star, degs = best["bundle"]
+                s_star  = A_S * x_star + b_S
+                sK_star = sum(int(s_star[i]) * (a**i) for i in range(n))
+                yK_star = F_univar(sK_star)
+                yvec_star = vector(GF(2), K(yK_star)._vector_())
+                b_T = A_T * yvec_star
+                z_fin = [p + R(int(b_T[i])) for i, p in enumerate(z0_R_best)]
+                ensure_dir_for(out_infile)
+                with open(out_infile, "w") as f:
+                    f.write(", ".join(str(v) for v in R.gens()) + "\n")
+                    f.write("2\n")
+                    for p in z_fin: f.write(str(p) + "\n")
+                    for v in R.gens(): f.write(f"{v}^2 + {v}\n")
+                log_write(L, f"TIMEOUT FALLBACK OUTPUT: {out_infile} (rank={best['rank']} < {rank_min})")
+                if secret_logfile is None:
+                    secret_logfile = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
+                write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, x_star)
+                return {
+                    "ok_zero": True, "rankJ": best["rank"], "rank_min": rank_min,
+                    "A_S": A_S, "b_S": b_S, "A_T": A_T, "b_T": b_T,
+                    "F": F_univar, "modulus": modulus, "secret": x_star,
+                    "public_polys": z_fin, "R": R,
+                    "have_quad_in_F": have_quad, "have_lin_in_F": have_lin,
+                    "public_degrees": degs, "map_attempts": amap,
+                    "secret_logfile": secret_logfile
+                }
+
+            
 
             # ---------- Success path: finish instance ----------
             if success is not None:

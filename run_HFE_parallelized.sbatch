@@ -7,10 +7,11 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32     
 #SBATCH --mem=128G
-#SBATCH --time=12:00:00
+#SBATCH --time=06:00:00
 
 set -euo pipefail
 unset HFE_SANITY 
+
 module load sagemath/10.6-singularity
 
 # Usage:
