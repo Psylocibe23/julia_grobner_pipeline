@@ -276,6 +276,19 @@ def boolean_reduce(poly, R):
 
 # ================= Jacobian helpers: precompute once per (S,T) ================
 
+# ======== helpers to avoid Sage Integer .bit_count issues =========
+def popcount_int(x):
+    v = int(x)
+    try:
+        return v.bit_count()           # Py3.8+
+    except AttributeError:
+        c = 0
+        while v:
+            v &= v - 1
+            c += 1
+        return c
+# ==================================================================
+
 # ---- Fast GF(2) Jacobian via bitmasks (for Boolean polys of total degree ≤ 2) ----
 def _build_jacobian_bitmasks(polys, R):
     """For each poly p_i, return (lin_mask_i, quad_rows_i),
@@ -327,18 +340,23 @@ def jacobian_rank_bitset(precomp, x_tuple):
     n = len(x_tuple)
     xmask = 0
     for j, b in enumerate(x_tuple):
-        if b: xmask |= (1 << j)
+        if b:
+            xmask |= (1 << j)
 
     bitrows = []
     for lin_mask, quad_rows in precomp:
         rowmask = 0
+        lin_mask_int = int(lin_mask)
         for j in range(n):
-            val = (lin_mask >> j) & 1
-            val ^= (_popcount_int(int(quad_rows[j]) & xmask) & 1)
-            if val: rowmask |= (1 << j)
+            val = (lin_mask_int >> j) & 1
+            # parity of neighbors that are 'on' in xmask
+            val ^= (popcount_int(int(quad_rows[j]) & xmask) & 1)
+            if val:
+                rowmask |= (1 << j)
         bitrows.append(rowmask)
 
     return _gf2_rank_from_bitrows(bitrows, n)
+
 
 
 def precompute_jacobian_derivatives(polys, R):
@@ -539,25 +557,13 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             bitJ = _build_jacobian_bitmasks(z0_R, R)
             _install_worker_state(bitJ, n)
 
-            def _popcount_int(x):
-            # Always use Python int, which supports big integers
-            try:
-                return int(x).bit_count()    # Py3.8+
-            except AttributeError:
-                # Fallback if bit_count() unavailable
-                v = int(x)
-                c = 0
-                while v:
-                    v &= v - 1
-                    c += 1
-                return c
-
             # ---- quick quality gate on the Jacobian structure ----
+
             def _row_weight(lin_mask, quad_rows):
-            m = int(lin_mask)
-            for r in quad_rows:
-                m |= int(r)                  # force Python int OR
-            return _popcount_int(m)
+                m = int(lin_mask)
+                for r in quad_rows:
+                    m |= int(r)     # force Python int OR
+                return popcount_int(m)
 
             min_avg = float(os.environ.get("HFE_MIN_AVG_ROW_W", "2.0"))
             avg_row_w = sum(_row_weight(lin, qrows) for (lin, qrows) in bitJ) / float(n)
