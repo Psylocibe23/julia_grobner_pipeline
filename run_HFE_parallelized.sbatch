@@ -5,12 +5,22 @@
 #SBATCH --qos=tesi_spreafichi
 #SBATCH --partition=turing-wide
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32     
+#SBATCH --cpus-per-task=32
 #SBATCH --mem=128G
 #SBATCH --time=06:00:00
+#SBATCH --signal=USR1@1200   # ping 20 min before kill
 
 set -euo pipefail
-unset HFE_SANITY 
+unset HFE_SANITY
+
+# Avoid BLAS/OMP oversubscription
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+# Save best-so-far ~20 minutes before SLURM kill
+export HFE_SOFT_TIMEOUT_SEC=$(( 6*3600 - 20*60 ))
 
 module load sagemath/10.6-singularity
 
@@ -26,16 +36,10 @@ RANK_MIN=${6:--}  # "-" = auto (n-1)
 ALLOW_FB=${7:-true}
 MAX_MAPS=${8:-30}
 MAX_TRIES=${9:-4096}
-WORKERS=${10:-auto} 
+WORKERS=${10:-auto}
 FORCE=${11:-false}
 
 mkdir -p logs data/hfe_instances
-
-# Avoid BLAS/OMP oversubscription
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
 
 # Force overwrite via env
 if [[ "$FORCE" == "true" ]]; then
@@ -46,15 +50,14 @@ fi
 OUTFILE="-"
 
 # If WORKERS is "auto", omit it so the script auto-picks from SLURM_CPUS_PER_TASK
+echo "[$(date)] Node(s): ${SLURM_JOB_NODELIST:-unknown}"
 if [[ "$WORKERS" == "auto" ]]; then
-  echo "[$(date)] Node(s): $SLURM_JOB_NODELIST"
-  echo "[$(date)] Generating HFE($N,$D) with up to $SLURM_CPUS_PER_TASK CPUs; workers=auto"
+  echo "[$(date)] Generating HFE($N,$D) with up to ${SLURM_CPUS_PER_TASK:-$SLURM_CPUS_ON_NODE} CPUs; workers=auto"
   sage scripts/construct_HFE_parallelized.sage \
       "$N" "$D" "$OUTFILE" "$SEED" "$PROB_QUAD" "$PROB_LIN" "$RANK_MIN" "$ALLOW_FB" \
       "$MAX_MAPS" "$MAX_TRIES"
 else
-  echo "[$(date)] Node(s): $SLURM_JOB_NODELIST"
-  echo "[$(date)] Generating HFE($N,$D) with up to $SLURM_CPUS_PER_TASK CPUs; workers=$WORKERS"
+  echo "[$(date)] Generating HFE($N,$D) with up to ${SLURM_CPUS_PER_TASK:-$SLURM_CPUS_ON_NODE} CPUs; workers=$WORKERS"
   sage scripts/construct_HFE_parallelized.sage \
       "$N" "$D" "$OUTFILE" "$SEED" "$PROB_QUAD" "$PROB_LIN" "$RANK_MIN" "$ALLOW_FB" \
       "$MAX_MAPS" "$MAX_TRIES" "$WORKERS"

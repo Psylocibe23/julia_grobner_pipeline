@@ -5,11 +5,26 @@
 # - Outputs pipeline .in, a public log, and a secret log (F,S,T,secret)
 ###############################################################################
 
-
-import sys, os, time, multiprocessing
+import sys, os, time, multiprocessing, signal
 import random as pyrand
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from sage.all import *
+
+# ============================ Signals / soft timeout ==========================
+
+_TIME_UP = False
+def _mark_time_up(signum, frame):
+    global _TIME_UP
+    _TIME_UP = True
+
+def _time_up(start_time, soft_budget):
+    return _TIME_UP or (soft_budget and (time.time() - start_time) >= soft_budget)
+
+# receive early warning (from SLURM) and final kill
+try:    signal.signal(signal.SIGUSR1, _mark_time_up)  # pre-timeout ping (sbatch --signal)
+except Exception: pass
+try:    signal.signal(signal.SIGTERM, _mark_time_up)  # final warning
+except Exception: pass
 
 # ============================ Utilities ======================================
 
@@ -77,7 +92,7 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
       • linearized terms: X^(2^i) when 2^i ≤ D;
       • TRUE quadratic terms: X^(2^i+2^j) with i<j and 2^i+2^j ≤ D.
 
-    No attempt is made to force deg(F) == D (computationally demanding); the top coefficient may vanish.
+    No attempt is made to force deg(F) == D; the top coefficient may vanish.
     """
     R.<X> = PolynomialRing(K)
     F = R(0)
@@ -135,8 +150,7 @@ def random_hfe_polynomial(K, n, D, prob_quad=0.6, prob_lin=0.6,
     return F, have_quad, have_lin
 
 
-
-# =================== Frobenius fast public builder =====================
+# =================== Frobenius fast public builder ============================
 
 def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
     """
@@ -149,7 +163,6 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
     Returns list y[0..n-1] contained in F2[x].
     """
     F2 = R.base_ring()
-    x = R.gens()
 
     # s(x) coefficients in K via the fixed basis {a^k}
     c = [K(0)]*(n+1)  # c[0]=constant, c[v+1] for x_v
@@ -188,12 +201,11 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
             if int(vec[t]) != 0:
                 y[t] += mono
 
-    # Traverse terms of F(X); in a univariate ring Sage uses int exponents
+    # terms of F(X)
     for exp, Kcoef in F_univar.dict().items():
         eX = int(exp)
 
         if eX == 0:
-            # constant term
             add_Kcoef_mon(Kcoef, zero_mon)
             continue
 
@@ -218,7 +230,6 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
                 bits.append(pos)
             tmp >>= 1; pos += 1
         if len(bits) != 2:
-            # HFE shouldn't introduce other exponents; skip if present
             continue
         i, j = bits[0], bits[1]
         c0i, c0j = c_pow[i][0], c_pow[j][0]
@@ -253,7 +264,7 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
 
     return y
 
-# ================= Project K[x] onto n coordinates in F2[x] (slow; for sanity) ==
+# ========== Project K[x] onto n coordinates in F2[x] (slow; for sanity) =======
 
 def coords_over_F2(poly_Kx, K, a, n, R_F2):
     coords = [R_F2(0) for _ in range(n)]
@@ -276,24 +287,20 @@ def boolean_reduce(poly, R):
 
 # ================= Jacobian helpers: precompute once per (S,T) ================
 
-# ======== helpers to avoid Sage Integer .bit_count issues =========
 def popcount_int(x):
     v = int(x)
     try:
-        return v.bit_count()           # Py3.8+
+        return v.bit_count()
     except AttributeError:
         c = 0
         while v:
             v &= v - 1
             c += 1
         return c
-# ==================================================================
 
-# ---- Fast GF(2) Jacobian via bitmasks (for Boolean polys of total degree ≤ 2) ----
+# ---- Fast GF(2) Jacobian via bitmasks (for Boolean polys of total degree ≤ 2)
 def _build_jacobian_bitmasks(polys, R):
-    """For each poly p_i, return (lin_mask_i, quad_rows_i),
-       where lin_mask_i is an n-bit int with bit j set iff x_j appears linearly in p_i,
-       and quad_rows_i[j] is an n-bit int with bit u set iff coefficient of x_j*x_u is 1."""
+    """For each poly p_i, return (lin_mask_i, quad_rows_i)."""
     n = len(R.gens())
     out = []
     for p in polys:
@@ -304,7 +311,7 @@ def _build_jacobian_bitmasks(polys, R):
                 continue
             idxs = [t for t, e in enumerate(mon) if e]  # after boolean_reduce, e∈{0,1}
             if not idxs:
-                continue  # constants vanish under derivative
+                continue
             if len(idxs) == 1:
                 j = idxs[0]
                 lin_mask |= (1 << j)
@@ -313,7 +320,6 @@ def _build_jacobian_bitmasks(polys, R):
                 if u != v:
                     quad_rows[u] |= (1 << v)
                     quad_rows[v] |= (1 << u)
-            # degree>2 shouldn't appear; ignore if any
         out.append((lin_mask, quad_rows))
     return out
 
@@ -349,15 +355,12 @@ def jacobian_rank_bitset(precomp, x_tuple):
         lin_mask_int = int(lin_mask)
         for j in range(n):
             val = (lin_mask_int >> j) & 1
-            # parity of neighbors that are 'on' in xmask
             val ^= (popcount_int(int(quad_rows[j]) & xmask) & 1)
             if val:
                 rowmask |= (1 << j)
         bitrows.append(rowmask)
 
     return _gf2_rank_from_bitrows(bitrows, n)
-
-
 
 def precompute_jacobian_derivatives(polys, R):
     xs = R.gens()
@@ -366,17 +369,14 @@ def precompute_jacobian_derivatives(polys, R):
 
 def jacobian_rank_at_from_derivs(derivs, R, x_star):
     F2 = R.base_ring()
-    # Build a tuple of F2 values once; evaluation by position is MUCH faster than subs(dict)
     vals = tuple(F2(int(b)) for b in x_star)
     n = len(vals)
     J = Matrix(F2, n, n)
     for i in range(n):
         di = derivs[i]
         for j in range(n):
-            # evaluate derivative polynomial at the point via positional args
             J[i, j] = di[j](*vals)
     return J.rank()
-
 
 # ============================== Secret log ====================================
 
@@ -422,7 +422,6 @@ def _probe_batch(batch_size, rank_min, seed=None):
             return {"found": True, "x": x_tuple, "rank": rankJ,
                     "best_rank": best_rank, "best_x": best_x}
     return {"found": False, "best_rank": best_rank, "best_x": best_x}
-
 
 # ========================= Builder ============================================
 
@@ -470,7 +469,6 @@ def build_and_export_instance(n, D, out_infile, seed=None,
 
         log_write(L, f"F has true quadratic? {have_quad}; linearized? {have_lin}")
 
-
         def rnd_inv(n, F2):
             while True:
                 M = random_matrix(F2, n, n)
@@ -479,17 +477,48 @@ def build_and_export_instance(n, D, out_infile, seed=None,
 
         best = {"rank": -1, "bundle": None}  # (A_S,b_S,A_T,z0_R,x_star,degs)
 
-        # Compute worker count 
+        # Compute worker count
         W = pick_workers(workers, max_secret_tries=max_secret_tries, batch_size=batch_size, n=n)
         if L: log_write(L, f"Workers: {W}   (batch_size per task: {batch_size})")
 
         for amap in range(1, max_maps+1):
+            if _time_up(start_time, soft_budget) and allow_fallback and best["bundle"] is not None:
+                # emit immediately if we're out of time at map start
+                A_S, b_S, A_T, z0_R_best, x_star, degs = best["bundle"]
+                s_star  = A_S * x_star + b_S
+                sK_star = sum(int(s_star[i]) * (a**i) for i in range(n))
+                yK_star = F_univar(sK_star)
+                yvec_star = vector(GF(2), K(yK_star)._vector_())
+                b_T = A_T * yvec_star
+                z_fin = [p + R(int(b_T[i])) for i, p in enumerate(z0_R_best)]
+                ensure_dir_for(out_infile)
+                with open(out_infile, "w") as f:
+                    f.write(", ".join(str(v) for v in R.gens()) + "\n")
+                    f.write("2\n")
+                    for p in z_fin: f.write(str(p) + "\n")
+                    for v in R.gens(): f.write(f"{v}^2 + {v}\n")
+                log_write(L, f"TIMEUP FALLBACK OUTPUT: {out_infile} (rank={best['rank']} < {rank_min})")
+                if secret_logfile is None:
+                    secret_logfile = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
+                write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, x_star)
+                return {
+                    "ok_zero": True, "rankJ": best["rank"], "rank_min": rank_min,
+                    "A_S": A_S, "b_S": b_S, "A_T": A_T, "b_T": b_T,
+                    "F": F_univar, "modulus": modulus, "secret": x_star,
+                    "public_polys": z_fin, "R": R,
+                    "have_quad_in_F": have_quad, "have_lin_in_F": have_lin,
+                    "public_degrees": degs, "map_attempts": amap,
+                    "secret_logfile": secret_logfile
+                }
+
             A_S = rnd_inv(n, F2)
             b_S = vector(F2, [F2.random_element() for _ in range(n)])
+
             # Build y(x) once per S (depends only on A_S, b_S)
             log_write(L, f"[map {amap}] building public polynomials via Frobenius fast path ...")
             t0 = time.time()
             y_vec_R = fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D)
+
             # Try a few A_T draws; keep the first one that yields degree ≥ 2 after Boolean reduction
             AT_RETRIES = int(os.environ.get("HFE_AT_RETRIES", "8"))
             z0_R = None
@@ -498,7 +527,6 @@ def build_and_export_instance(n, D, out_infile, seed=None,
 
             for at_try in range(1, AT_RETRIES + 1):
                 A_T_try = rnd_inv(n, F2)
-
                 z0_R_try = []
                 for i in range(n):
                     acc = R(0)
@@ -524,7 +552,6 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             A_T = chosen_A_T
             log_write(L, f"[map {amap}] public system built in {time.time()-t0:.2f}s")
             log_write(L, f"[map {amap}] public max degree after Boolean: {max(degs)}")
-
 
             # ---------- Optional sanity ----------
             if os.environ.get("HFE_SANITY") == "1":
@@ -558,11 +585,10 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             _install_worker_state(bitJ, n)
 
             # ---- quick quality gate on the Jacobian structure ----
-
             def _row_weight(lin_mask, quad_rows):
                 m = int(lin_mask)
                 for r in quad_rows:
-                    m |= int(r)     # force Python int OR
+                    m |= int(r)
                 return popcount_int(m)
 
             min_avg = float(os.environ.get("HFE_MIN_AVG_ROW_W", "2.0"))
@@ -571,8 +597,6 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                 log_write(L, f"[map {amap}] gate: avg row weight {avg_row_w:.2f} < {min_avg:.2f} — resampling map")
                 continue
 
-
-
             remaining = max_secret_tries
             success = None  # (x_tuple, rankJ)
             best_rank_seen = -1
@@ -580,7 +604,8 @@ def build_and_export_instance(n, D, out_infile, seed=None,
 
             if W <= 1:
                 t = 0
-                while remaining > 0:
+                while remaining > 0 and success is None:
+                    if _time_up(start_time, soft_budget): break
                     bs = min(batch_size, remaining)
                     res = _probe_batch(bs, rank_min, seed=None)
                     remaining -= bs; t += bs
@@ -607,10 +632,12 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                             remaining -= bs
 
                     submit_some()
-                    while futures and success is None:
-                        done = []
-                        for fut in as_completed(futures, timeout=None):
-                            done.append(fut)
+                    while futures and success is None and not _time_up(start_time, soft_budget):
+                        # Wake up at least once per second to check for time-up
+                        done, pending = wait(futures, timeout=1.0, return_when=FIRST_COMPLETED)
+                        if not done:
+                            continue
+                        for fut in done:
                             try:
                                 res = fut.result()
                             except Exception:
@@ -618,12 +645,11 @@ def build_and_export_instance(n, D, out_infile, seed=None,
 
                             if res.get("found"):
                                 success = (tuple(res["x"]), int(res["rank"]))
-                                break
+                            else:
+                                if res["best_rank"] > best_rank_seen:
+                                    best_rank_seen = int(res["best_rank"])
+                                    best_point = tuple(res["best_x"]) if res["best_x"] is not None else best_point
 
-                            if res["best_rank"] > best_rank_seen:
-                                best_rank_seen, best_point = int(res["best_rank"]), tuple(res["best_x"])
-
-                        for fut in done:
                             futures.discard(fut)
 
                         if success is None:
@@ -642,8 +668,9 @@ def build_and_export_instance(n, D, out_infile, seed=None,
             if best_rank_seen > best["rank"]:
                 best["rank"]   = best_rank_seen
                 best["bundle"] = (A_S, b_S, A_T, z0_R, vector(F2, best_point) if best_point else None, degs)
+
             # Emit best-available instance if we ran out of time
-            if soft_budget and (time.time() - start_time) >= soft_budget and allow_fallback and best["bundle"] is not None:
+            if _time_up(start_time, soft_budget) and allow_fallback and best["bundle"] is not None:
                 A_S, b_S, A_T, z0_R_best, x_star, degs = best["bundle"]
                 s_star  = A_S * x_star + b_S
                 sK_star = sum(int(s_star[i]) * (a**i) for i in range(n))
@@ -657,7 +684,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                     f.write("2\n")
                     for p in z_fin: f.write(str(p) + "\n")
                     for v in R.gens(): f.write(f"{v}^2 + {v}\n")
-                log_write(L, f"TIMEOUT FALLBACK OUTPUT: {out_infile} (rank={best['rank']} < {rank_min})")
+                log_write(L, f"TIMEUP FALLBACK OUTPUT: {out_infile} (rank={best['rank']} < {rank_min})")
                 if secret_logfile is None:
                     secret_logfile = os.path.join("logs", f"HFE_n{n}_D{D}_secret.txt")
                 write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, x_star)
@@ -670,8 +697,6 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                     "public_degrees": degs, "map_attempts": amap,
                     "secret_logfile": secret_logfile
                 }
-
-            
 
             # ---------- Success path: finish instance ----------
             if success is not None:
@@ -720,7 +745,7 @@ def build_and_export_instance(n, D, out_infile, seed=None,
                     "secret_logfile": secret_logfile
                 }
 
-        # ---------- Fallback ----------
+        # ---------- Fallback after all maps ----------
         if allow_fallback and best["rank"] >= 0 and best["bundle"] is not None:
             A_S, b_S, A_T, z0_R, x_star, degs = best["bundle"]
             if x_star is None:
@@ -806,6 +831,7 @@ def main():
         print(f"[{now_str()}] Found existing instance: {out_infile} — skipping. "
               f"(set HFE_FORCE=1 or pass final 'true' to regenerate)")
         return
+
     batch_size = int(os.environ.get("HFE_BATCH_SIZE", "128"))
     workers = pick_workers(workers_arg, max_secret_tries=max_secret_tries, batch_size=batch_size, n=n)
 
