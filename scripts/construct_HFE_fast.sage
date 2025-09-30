@@ -206,7 +206,9 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
 
     # largest 2^t ≤ D
     max_t = 0; e = 1
-    while (e<<=1) <= D: max_t += 1
+    while (e << 1) <= D:
+        e <<= 1
+        max_t += 1
     # precompute c_i^{2^t}
     c_pow = [[K(0)]*(n+1) for _ in range(max_t+1)]
     for i in range(n+1):
