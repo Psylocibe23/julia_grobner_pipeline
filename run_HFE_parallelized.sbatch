@@ -7,7 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=128G
-#SBATCH --time=06:00:00
+#SBATCH --time=02:00:00
 #SBATCH --signal=USR1@1200   # ping 20 min before kill
 
 set -euo pipefail
@@ -20,7 +20,7 @@ export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 # Save best-so-far ~20 minutes before SLURM kill
-export HFE_SOFT_TIMEOUT_SEC=$(( 6*3600 - 20*60 ))
+export HFE_SOFT_TIMEOUT_SEC=$(( 2*3600 - 20*60 ))
 
 module load sagemath/10.6-singularity
 
