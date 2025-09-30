@@ -97,7 +97,7 @@ def _gf2_rank_from_bitrows(bitrows, n):
         pivrow = rows[rank]
         for r in range(len(rows)):
             if r != rank and (rows[r] & mask):
-                rows[r] ^= pivrow
+                rows[r] ^= pivrow    # XOR over GF(2)
         rank += 1
         if rank == n:
             break
@@ -107,8 +107,9 @@ def jacobian_rank_bitset(precomp, x_tuple):
     """x_tuple ∈ {0,1}^n → rank of J at x_tuple."""
     n = len(x_tuple)
     xmask = 0
-    for j,b in enumerate(x_tuple):
-        if b: xmask |= (1 << j)
+    for j, b in enumerate(x_tuple):
+        if b:
+            xmask |= (1 << j)
     bitrows = []
     for (lin_mask, qrows) in precomp:
         rowmask = 0
@@ -125,8 +126,9 @@ def jacobian_rank_bitset(precomp, x_tuple):
 def boolean_reduce(poly, R):
     terms = {}
     for mon, coeff in poly.dict().items():
-        if coeff == 0: continue
-        red = tuple(1 if e>0 else 0 for e in mon)
+        if coeff == 0:
+            continue
+        red = tuple(1 if e > 0 else 0 for e in mon)
         terms[red] = (terms.get(red, R.base_ring()(0)) + coeff)
     return R(terms)
 
@@ -148,16 +150,16 @@ def random_hfe_univariate(K, n, D, prob_quad=0.7, prob_lin=0.6, must_quad=True, 
         for j in range(i+1, n):
             e_ij = e_i + (1 << j)
             if e_ij > D: break
-            quad_pairs.append((i,j))
+            quad_pairs.append((i, j))
     have_q = False; have_l = False
     used_max_exp = 0
 
     # quadratic terms
-    for (i,j) in quad_pairs:
+    for (i, j) in quad_pairs:
         if pyrand.random() < prob_quad:
             c = K.random_element()
             if c != 0:
-                exp = (1<<i) + (1<<j)
+                exp = (1 << i) + (1 << j)
                 if exp > used_max_exp: used_max_exp = exp
                 F += c * X**exp
                 have_q = True
@@ -166,7 +168,7 @@ def random_hfe_univariate(K, n, D, prob_quad=0.7, prob_lin=0.6, must_quad=True, 
         if pyrand.random() < prob_lin:
             c = K.random_element()
             if c != 0:
-                exp = (1<<i)
+                exp = (1 << i)
                 if exp > used_max_exp: used_max_exp = exp
                 F += c * X**exp
                 have_l = True
@@ -177,21 +179,21 @@ def random_hfe_univariate(K, n, D, prob_quad=0.7, prob_lin=0.6, must_quad=True, 
 
     # ensure presence if requested and admissible
     if must_quad and (not have_q) and quad_pairs:
-        i,j = quad_pairs[0]
-        exp = (1<<i) + (1<<j)
+        i, j = quad_pairs[0]
+        exp = (1 << i) + (1 << j)
         F += K(1) * X**exp
         used_max_exp = max(used_max_exp, exp)
         have_q = True
     if must_lin and (not have_l) and lin_is:
         i = lin_is[0]
-        exp = (1<<i)
+        exp = (1 << i)
         F += K(1) * X**exp
         used_max_exp = max(used_max_exp, exp)
         have_l = True
 
     return F, used_max_exp, have_q, have_l
 
-# ----- Fast public map evaluation: K-→F2^n split via power basis -----
+# ----- Fast public map evaluation: K → F2^n split via power basis -----
 def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
     F2 = R.base_ring()
     # s(x) = c0 + Σ_v c_v x_v  in K, with c_• determined by A_S,b_S and basis {a^k}
@@ -201,11 +203,12 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
         if int(b_S[k]) != 0:
             c[0] += ak
         for v in range(n):
-            if int(A_S[k,v]) != 0:
+            if int(A_S[k, v]) != 0:
                 c[v+1] += ak
 
     # largest 2^t ≤ D
-    max_t = 0; e = 1
+    max_t = 0
+    e = 1
     while (e << 1) <= D:
         e <<= 1
         max_t += 1
@@ -220,12 +223,12 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
 
     # accumulate y ∈ (F2[x])^n via coefficient splitting
     y = [R(0) for _ in range(n)]
-    xs = R.gens()
     zero_mon = tuple(0 for _ in range(n))
 
     def add_Kcoef_mon(Kcoef, mon_tuple):
-        if Kcoef == 0: return
-        vec = Kcoef._vector_()  # K → F2^n on power basis
+        if Kcoef == 0: 
+            return
+        vec = Kcoef.vector()   # K → F2^n on the construction basis
         mono = R({mon_tuple: 1})
         for t in range(n):
             if int(vec[t]) != 0:
@@ -237,46 +240,50 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
             add_Kcoef_mon(Kc, zero_mon)
             continue
         # power of two: 2^i
-        if (eX & (eX-1)) == 0:
-            i = eX.bit_length()-1
+        if (eX & (eX - 1)) == 0:
+            i = eX.bit_length() - 1
             c0i = c_pow[i][0]
-            if c0i != 0: add_Kcoef_mon(Kc * c0i, zero_mon)
+            if c0i != 0:
+                add_Kcoef_mon(Kc * c0i, zero_mon)
             for v in range(n):
                 Cv = c_pow[i][v+1]
                 if Cv != 0:
-                    mon = tuple(1 if j==v else 0 for j in range(n))
+                    mon = tuple(1 if j == v else 0 for j in range(n))
                     add_Kcoef_mon(Kc * Cv, mon)
             continue
-        # binary popcount==2  → 2^i+2^j
+        # binary popcount == 2  → 2^i+2^j
         bits = []
-        tmp = eX; pos=0
+        tmp = eX; pos = 0
         while tmp:
-            if tmp & 1: bits.append(pos)
+            if tmp & 1:
+                bits.append(pos)
             tmp >>= 1; pos += 1
         if len(bits) != 2:
             continue
-        i,j = bits[0], bits[1]
+        i, j = bits[0], bits[1]
         c0i, c0j = c_pow[i][0], c_pow[j][0]
         if c0i != 0 and c0j != 0:
             add_Kcoef_mon(Kc * c0i * c0j, zero_mon)
         for v in range(n):
             Ci_v = c_pow[i][v+1]; Cj_v = c_pow[j][v+1]
             if c0i != 0 and Cj_v != 0:
-                mon = tuple(1 if t==v else 0 for t in range(n))
+                mon = tuple(1 if t == v else 0 for t in range(n))
                 add_Kcoef_mon(Kc * c0i * Cj_v, mon)
             if c0j != 0 and Ci_v != 0:
-                mon = tuple(1 if t==v else 0 for t in range(n))
+                mon = tuple(1 if t == v else 0 for t in range(n))
                 add_Kcoef_mon(Kc * c0j * Ci_v, mon)
         for v in range(n):
             Ci_v = c_pow[i][v+1]
-            if Ci_v == 0: continue
+            if Ci_v == 0: 
+                continue
             for u in range(n):
                 Cj_u = c_pow[j][u+1]
-                if Cj_u == 0: continue
+                if Cj_u == 0: 
+                    continue
                 if v == u:
-                    mon = tuple(1 if t==v else 0 for t in range(n))
+                    mon = tuple(1 if t == v else 0 for t in range(n))
                 else:
-                    mon = tuple(1 if (t==v or t==u) else 0 for t in range(n))
+                    mon = tuple(1 if (t == v or t == u) else 0 for t in range(n))
                 add_Kcoef_mon(Kc * Ci_v * Cj_u, mon)
     return y
 
@@ -311,14 +318,15 @@ def build_and_export_fast(n, D, out_infile,
         set_random_seed(int(seed)); pyrand.seed(int(seed))
 
     start = time.time()
-    if rank_min is None: rank_min = max(0, n-1)
+    if rank_min is None: 
+        rank_min = max(0, n - 1)
 
     F2 = GF(2)
-    K.<a> = GF(2**n)          # power-basis; K.modulus() reproducible in secret log if you want
+    K.<a> = GF(2**n)          # power-basis
     names = tuple(f"x{i}" for i in range(n))
     R = PolynomialRing(F2, n, names=names)
 
-    # One F(X) for the whole run (fast & standard in your pipeline)
+    # One F(X) for the whole run
     F_univar, used_exp, have_q, have_l = random_hfe_univariate(
         K, n, D, prob_quad=prob_quad, prob_lin=prob_lin, must_quad=True, must_lin=True
     )
@@ -328,14 +336,15 @@ def build_and_export_fast(n, D, out_infile,
     if log_path:
         ensure_dir_for(log_path)
         L = open(log_path, "w")
-        def lw(s): L.write(s+"\n"); L.flush()
+        def lw(s): L.write(s + "\n"); L.flush()
         lw(f"Start: {now_str()}")
         lw(f"n={n}, D_target={D}, D_used={D_used}, rank_min={rank_min}")
     else:
         L = None
-        def lw(s): pass
+        def lw(s): 
+            pass
 
-    best = {"rank": -1, "bundle": None}  # bundle=(A_S, b_S, A_T, z0_R, x_best, degs)
+    best = {"rank": -1, "bundle": None}  # bundle=(A_S, b_S, A_T, z0_R, x_best_tuple_or_None, degs)
     attempts = 0
     success = None
 
@@ -347,6 +356,7 @@ def build_and_export_fast(n, D, out_infile,
 
         # build y via fast Frobenius expansion
         y_vec_R = fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D)
+
         # choose T ensuring nontrivial Boolean degree
         chosen_A_T = None
         z0_R = None
@@ -357,7 +367,7 @@ def build_and_export_fast(n, D, out_infile,
             for i in range(n):
                 acc = R(0)
                 for j in range(n):
-                    if int(A_T_try[i,j]) != 0:
+                    if int(A_T_try[i, j]) != 0:
                         acc += y_vec_R[j]
                 cand.append(acc)
             cand_bool = booleanize_vec(cand, R)
@@ -374,24 +384,26 @@ def build_and_export_fast(n, D, out_infile,
         # precompute Jacobian structure, probe secrets
         bitJ = _build_jacobian_bitmasks(z0_R, R)
         best_rank = -1
-        best_x = None
+        best_x_tuple = None
 
         for t in range(secret_tries_per_map):
             x_tuple = tuple(pyrand.getrandbits(1) for _ in range(n))
             rankJ = jacobian_rank_bitset(bitJ, x_tuple)
             if rankJ > best_rank:
-                best_rank, best_x = rankJ, x_tuple
+                best_rank, best_x_tuple = rankJ, x_tuple
                 if best_rank >= rank_min:
-                    success = (A_S, b_S, chosen_A_T, z0_R, vector(F2, best_x), degs, best_rank)
+                    success = (A_S, b_S, chosen_A_T, z0_R, vector(F2, best_x_tuple), degs, best_rank)
                     break
             # gentle time check inside the loop
             if (t & 255) == 0 and (time.time() - start) >= time_budget_sec:
                 break
 
-        # track global best
+        # track global best (store tuple; convert to vector only when needed)
         if best_rank > best["rank"]:
             best["rank"] = best_rank
-            best["bundle"] = (A_S, b_S, chosen_A_T, z0_R, vector(F2, best_x), degs)
+            best["bundle"] = (A_S, b_S, chosen_A_T, z0_R,
+                              tuple(best_x_tuple) if best_x_tuple is not None else None,
+                              degs)
 
         # stop early on success
         if success is not None:
@@ -400,31 +412,43 @@ def build_and_export_fast(n, D, out_infile,
     # choose output (success or fallback)
     if success is None:
         if best["bundle"] is None:
-            # extremely unlikely: still force an output using the last map skeleton
+            # Extremely unlikely: still force an output using a fresh map skeleton
             A_S = rnd_invertible(n, F2)
             b_S = vector(F2, [F2.random_element() for _ in range(n)])
             y_vec_R = fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D)
             A_T = rnd_invertible(n, F2)
-            z0_R = booleanize_vec([ sum(int(A_T[i,j])*y_vec_R[j] for j in range(n)) for i in range(n) ], R)
+            z0_raw = []
+            for i in range(n):
+                acc = R(0)
+                for j in range(n):
+                    if int(A_T[i, j]) != 0:
+                        acc += y_vec_R[j]
+                z0_raw.append(acc)
+            z0_R = booleanize_vec(z0_raw, R)
             degs = [p.total_degree() for p in z0_R]
-            best_bundle = (A_S, b_S, A_T, z0_R, vector(F2, [0]*n), degs)
+            best_bundle = (A_S, b_S, A_T, z0_R, None, degs)
         else:
             best_bundle = best["bundle"]
-        A_S, b_S, A_T, z0_R, x_star, degs = best_bundle
-        # set b_T so that P(x*)=0
-        # Compute y(S(x*)) in K-coords and split via A_T to get b_T
-        s_star = A_S * x_star + b_S
-        sK_star = sum(int(s_star[i])*(a**i) for i in range(n))
+
+        A_S, b_S, A_T, z0_R, x_star_tuple, degs = best_bundle
+        # set b_T so that P(x*)=0  (use zero vector if we never recorded a point)
+        x_star_vec = vector(F2, [0]*n) if x_star_tuple is None else vector(F2, x_star_tuple)
+        s_star = A_S * x_star_vec + b_S
+        sK_star = sum(int(s_star[i]) * (a**i) for i in range(n))
         yK_star = F_univar(sK_star)
-        yvec_star = vector(F2, K(yK_star)._vector_())
+        yvec_star = yK_star.vector()
         b_T = A_T * yvec_star
-        z_fin = [ z0_R[i] + R(int(b_T[i])) for i in range(n) ]
+        z_fin = [z0_R[i] + R(int(b_T[i])) for i in range(n)]
+
         ensure_dir_for(out_infile)
         with open(out_infile, "w") as f:
             f.write(", ".join(str(v) for v in R.gens()) + "\n")
             f.write("2\n")
-            for p in z_fin: f.write(str(p) + "\n")
-            for v in R.gens(): f.write(f"{v}^2 + {v}\n")
+            for p in z_fin: 
+                f.write(str(p) + "\n")
+            for v in R.gens(): 
+                f.write(f"{v}^2 + {v}\n")
+
         if L:
             lw(f"[FALLBACK] wrote {out_infile} with rank={best['rank']} < target {rank_min}, maxdeg_used={max(degs)}, D_used={D_used}")
             L.close()
@@ -433,20 +457,25 @@ def build_and_export_fast(n, D, out_infile,
             "D_target": D, "D_used": D_used, "public_maxdeg": max(degs),
             "outfile": out_infile, "attempts": attempts
         }
+
     else:
-        A_S, b_S, A_T, z0_R, x_star, degs, rankJ = success
-        s_star = A_S * x_star + b_S
-        sK_star = sum(int(s_star[i])*(a**i) for i in range(n))
+        A_S, b_S, A_T, z0_R, x_star_vec, degs, rankJ = success
+        s_star = A_S * x_star_vec + b_S
+        sK_star = sum(int(s_star[i]) * (a**i) for i in range(n))
         yK_star = F_univar(sK_star)
-        yvec_star = vector(F2, K(yK_star)._vector_())
+        yvec_star = yK_star.vector()
         b_T = A_T * yvec_star
-        z_fin = [ z0_R[i] + R(int(b_T[i])) for i in range(n) ]
+        z_fin = [z0_R[i] + R(int(b_T[i])) for i in range(n)]
+
         ensure_dir_for(out_infile)
         with open(out_infile, "w") as f:
             f.write(", ".join(str(v) for v in R.gens()) + "\n")
             f.write("2\n")
-            for p in z_fin: f.write(str(p) + "\n")
-            for v in R.gens(): f.write(f"{v}^2 + {v}\n")
+            for p in z_fin: 
+                f.write(str(p) + "\n")
+            for v in R.gens(): 
+                f.write(f"{v}^2 + {v}\n")
+
         if L:
             lw(f"[SUCCESS] wrote {out_infile} with rank={rankJ} ≥ target {rank_min}, maxdeg_used={max(degs)}, D_used={D_used}")
             L.close()
@@ -513,5 +542,5 @@ def main():
         print(f"[{now_str()}] Done. rank={info['rankJ']} (target {info['rank_min']}), D_used={info['D_used']}, public_maxdeg={info['public_maxdeg']}, attempts={info['attempts']}")
         print(f"[{now_str()}] Wrote: {info['outfile']}")
 
-if __name__ == "__main__" or __name__ == "__main__":
+if __name__ == "__main__":
     main()
