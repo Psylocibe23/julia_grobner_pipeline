@@ -8,12 +8,10 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=128G
 #SBATCH --time=12:00:00
-#SBATCH --signal=USR1@1500   # ping 30 min before kill
+#SBATCH --signal=USR1@1200   # ping 20 min before kill
 
 set -euo pipefail
 unset HFE_SANITY
-trap 'echo "[$(date)] USR1 received -> forwarding to children"; kill -USR1 0' USR1
-trap 'echo "[$(date)] TERM received -> forwarding to children"; kill -TERM 0' TERM
 
 # Avoid BLAS/OMP oversubscription
 export OMP_NUM_THREADS=1
@@ -22,7 +20,7 @@ export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 # Save best-so-far ~20 minutes before SLURM kill
-export HFE_SOFT_TIMEOUT_SEC=$(( 12*3600 - 30*60 ))
+export HFE_SOFT_TIMEOUT_SEC=$(( 12*3600 - 20*60 ))
 
 module load sagemath/10.6-singularity
 
@@ -55,14 +53,14 @@ OUTFILE="-"
 echo "[$(date)] Node(s): ${SLURM_JOB_NODELIST:-unknown}"
 if [[ "$WORKERS" == "auto" ]]; then
   echo "[$(date)] Generating HFE($N,$D) with up to ${SLURM_CPUS_PER_TASK:-$SLURM_CPUS_ON_NODE} CPUs; workers=auto"
-  exec sage scripts/construct_HFE_parallelized.sage \
-    "$N" "$D" "$OUTFILE" "$SEED" "$PROB_QUAD" "$PROB_LIN" "$RANK_MIN" "$ALLOW_FB" \
-    "$MAX_MAPS" "$MAX_TRIES"
+  sage scripts/construct_HFE_parallelized.sage \
+      "$N" "$D" "$OUTFILE" "$SEED" "$PROB_QUAD" "$PROB_LIN" "$RANK_MIN" "$ALLOW_FB" \
+      "$MAX_MAPS" "$MAX_TRIES"
 else
   echo "[$(date)] Generating HFE($N,$D) with up to ${SLURM_CPUS_PER_TASK:-$SLURM_CPUS_ON_NODE} CPUs; workers=$WORKERS"
-  exec sage scripts/construct_HFE_parallelized.sage \
-    "$N" "$D" "$OUTFILE" "$SEED" "$PROB_QUAD" "$PROB_LIN" "$RANK_MIN" "$ALLOW_FB" \
-    "$MAX_MAPS" "$MAX_TRIES" "$WORKERS"
+  sage scripts/construct_HFE_parallelized.sage \
+      "$N" "$D" "$OUTFILE" "$SEED" "$PROB_QUAD" "$PROB_LIN" "$RANK_MIN" "$ALLOW_FB" \
+      "$MAX_MAPS" "$MAX_TRIES" "$WORKERS"
 fi
 
 echo "[$(date)] ✅ Done"
