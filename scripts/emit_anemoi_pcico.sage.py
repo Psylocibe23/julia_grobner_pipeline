@@ -4,15 +4,15 @@
 from sage.all_cmdline import *   # import sage library
 
 _sage_const_0 = Integer(0); _sage_const_1 = Integer(1); _sage_const_2 = Integer(2); _sage_const_16 = Integer(16); _sage_const_3 = Integer(3)###############################################################################
-# emit_anemoi_pcico.sage — Write PCICO (ℓ=1) Anemoi systems over GF(p) to .in
+# emit_anemoi_pcico.sage — Write PCICO (l=1) Anemoi systems over GF(p) to .in
 #
 # INPUT  (CLI)
-#   --p <prime | 0xHEX | NAME>   prime p, or hex literal, or a name from constants.py
-#   --alpha <odd>                S-box alpha (must satisfy gcd(alpha, p-1) = 1)
-#   --rounds <r>                 number of rounds r  (ℓ=1 only)
-#   [--outfile path]             output file path (default: data/ANEMOI_p<p>_r<r>_a<alpha>_PCICO.in)
-#   [--ordering {1,2,3}]         variable ordering in model_P_CICO (default 1 = recommended)
-#   [--no-final-ll]              omit final linear layer constraint (default: include it)
+#   --p prime p, or hex literal, or a name from constants.py
+#   --alpha <odd> S-box alpha (must satisfy gcd(alpha, p-1) = 1)
+#   --rounds <r> number of rounds r (l=1 only)
+#   [--outfile path] output file path (default: data/ANEMOI_p<p>_r<r>_a<alpha>_PCICO.in)
+#   [--ordering {1,2,3}] variable ordering in model_P_CICO (default 1 = recommended)
+#   [--no-final-ll] omit final linear layer constraint (default: include it)
 #e.g.: sage scripts/emit_anemoi_pcico.sage --p 251 --alpha 3 --rounds 2
 #
 # OUTPUT (.in)
@@ -21,29 +21,28 @@ _sage_const_0 = Integer(0); _sage_const_1 = Integer(1); _sage_const_2 = Integer(
 #   Line 3+: one polynomial per line (Sage textual form; coefficients in [0..p-1])
 #
 # NOTES
-#   • Model: P_CICO, ℓ=1 (as in the paper’s best-performing prime-field model).
-#   • Field: odd prime GF(p) only (your F4/F5 stage assumes prime fields).
-#   • Order: the model builds a DRL ring; we preserve its variable order verbatim.
+#   • Model: P_CICO, l=1 (as in the paper’s best-performing prime-field model)
+#   • Field: odd prime GF(p) only 
 ###############################################################################
 
 import sys, os
 
-# Ensure we can import the local "constants.py" that anemoi.sage expects.
+
 if os.path.isdir("scripts"):
     sys.path.insert(_sage_const_0 , os.path.abspath("scripts"))
 
-# Load the authors' modules
+# Load modules
 load("scripts/anemoi.sage")
 load("scripts/models.sage")
 
-# (Optional) also import constants.py as a Python module to resolve names given to --p
+# Import constants.py as a Python module to resolve names given to --p
 try:
     import importlib
     constants_mod = importlib.import_module("constants")  # from scripts/constants.py
 except Exception:
     constants_mod = None
 
-# ---------------- CLI parsing ----------------
+# ================= CLI parsing =================
 def _usage_and_exit():
     print("Usage: sage scripts/emit_anemoi_pcico.sage --p <prime|0xHEX|NAME> --alpha <odd> --rounds <r> "
           "[--outfile path] [--ordering 1|2|3] [--no-final-ll]", file=sys.stderr)
@@ -74,7 +73,7 @@ while i < len(argv):
 if args["p"] is None or args["alpha"] is None or args["rounds"] is None:
     _usage_and_exit()
 
-# ---------------- Convert/validate p ----------------
+# ================= Convert/validate p =================
 def resolve_prime(p_spec):
     """
     p_spec may be decimal int, 0x... hex, or a symbol in constants.py.
@@ -110,8 +109,8 @@ if gcd(alpha, p-_sage_const_1 ) != _sage_const_1 :
 if args["ordering"] not in (_sage_const_1 ,_sage_const_2 ,_sage_const_3 ):
     raise ValueError("ordering must be one of {1,2,3} (recommended: 1)")
 
-# ---------------- Build the PCICO system ----------------
-# ℓ = 1 (n_cols = 1)
+# ================= Build the PCICO system =================
+# l = 1 (n_cols = 1)
 P = AnemoiPermutation(q=p, alpha=alpha, n_rounds=r, n_cols=_sage_const_1 )
 
 F_CICO, _dict_vars = model_P_CICO(
@@ -125,12 +124,12 @@ if not F_CICO:
 R = F_CICO[_sage_const_0 ].parent()
 var_names = list(R.variable_names())
 
-# Sanity: expecting r + (1 if final_ll else 0) equations for ℓ=1
+# Sanity: expecting r + (1 if final_ll else 0) equations for l=1
 expected_eqs = r + (_sage_const_1  if args["final_ll"] else _sage_const_0 )
 if len(F_CICO) != expected_eqs:
     print(f"[warn] Got {len(F_CICO)} equations; expected {expected_eqs}. Proceeding.", file=sys.stderr)
 
-# ---------------- Write the .in file ----------------
+# ================= Write the .in file =================
 if args["outfile"] is None:
     stem = f"ANEMOI_p{p}_r{r}_a{alpha}_PCICO" + ("" if args["final_ll"] else "_noFLL")
     outdir = "data"
@@ -151,7 +150,7 @@ with open(outfile, "w") as f:
         f.write(str(g) + "\n")
 
 print(f"Wrote PCICO system to: {outfile}")
-print(f"  Variables (|V|={len(var_names)}): {', '.join(var_names)}")
-print(f"  Field: GF({p})  (alpha={alpha}, rounds={r}, ordering={args['ordering']}, final_ll={args['final_ll']})")
-print(f"  #Equations: {len(F_CICO)}")
+print(f"Variables (|V|={len(var_names)}): {', '.join(var_names)}")
+print(f"Field: GF({p})  (alpha={alpha}, rounds={r}, ordering={args['ordering']}, final_ll={args['final_ll']})")
+print(f"#Equations: {len(F_CICO)}")
 
