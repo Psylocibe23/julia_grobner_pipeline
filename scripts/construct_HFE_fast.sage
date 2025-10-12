@@ -26,7 +26,6 @@ def is_unset(s):
 def split_to_F2_vec(elem, n):
     """
     Coordinates of elem ∈ GF(2^n) on the construction power basis as GF(2)^n.
-    Works with NTL-backed elements (no .vector()) and generic ones.
     """
     F2 = elem.parent().base_ring()
     try:
