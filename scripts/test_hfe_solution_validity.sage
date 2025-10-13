@@ -22,7 +22,7 @@
 import sys, re, ast
 from sage.all import GF, PolynomialRing, Matrix, vector, matrix
 
-# ================ Ytils ================
+# --------------------------- Ytils ---------------------------
 def _strip_labels_and_brackets(line):
     s = line.strip()
     if "=" in s:
@@ -33,7 +33,7 @@ def _parse_int_list(s):
     """Parse comma/space separated integers from string s."""
     return [int(t) for t in re.split(r"[,\s]+", s) if t != ""]
 
-# ================ Parse .in file ================
+# --------------------------- Parse .in file ---------------------------
 def parse_in_file(infile):
     """
     Returns:
@@ -88,7 +88,7 @@ def parse_in_file(infile):
 
     return var_names, F, R, public_polys, field_polys
 
-# ================ Parse solutions file ================
+# --------------------------- Parse solutions file ---------------------------
 def parse_solutions_file(solfile):
     sols = []
     with open(solfile) as f:
@@ -115,7 +115,7 @@ def check_solution_keys(var_names, sol_dict):
     extra   = sorted(ks - need)
     return missing, extra
 
-# ================ Evaluate equations at candidate solution ================
+# --------------------------- Evaluate equations at candidate solution ---------------------------
 def eval_polys(polys, R, var_names, sol_dict):
     """
     Evaluate each polynomial at the point specified by sol_dict
@@ -125,7 +125,7 @@ def eval_polys(polys, R, var_names, sol_dict):
     vals = tuple(F(int(sol_dict[name])) for name in var_names)  # KeyError -> loud
     return [p(*vals) == 0 for p in polys]
 
-# ================ Parse log/gen file ================
+# --------------------------- Parse log/gen file ---------------------------
 def load_secret_and_maps_from_log(logfile):
     """
     Attempt to recover from the log:
@@ -198,7 +198,7 @@ def load_secret_and_maps_from_log(logfile):
 
     return secret, A_S, b_S, A_T, b_T
 
-# ================ S equivalence test ================
+# --------------------------- S equivalence test ---------------------------
 def S_equivalent(var_names, sol_dict, secret_vector, A_S, b_S):
     """
     Return True iff A_S * sol + b_S == A_S * secret + b_S over GF(2).
@@ -208,7 +208,7 @@ def S_equivalent(var_names, sol_dict, secret_vector, A_S, b_S):
     x_sec = vector(F2, [F2(int(b))          for b in secret_vector])
     return (A_S * x_sol + b_S) == (A_S * x_sec + b_S)
 
-# ================ Jacobian rank ================
+# --------------------------- Jacobian rank ---------------------------
 def jacobian_rank_at_point(polys, R, var_names, sol_dict):
     """
     Compute rank over GF(p) of the Jacobian of polys at the point defined by sol_dict
@@ -219,7 +219,7 @@ def jacobian_rank_at_point(polys, R, var_names, sol_dict):
     J = matrix(F, [[p.derivative(xj)(*vals) for xj in x] for p in polys])
     return J.rank()
 
-# ================ Main ================
+# --------------------------- Main ---------------------------
 def main():
     if len(sys.argv) < 3:
         print("Usage: sage scripts/test_hfe_solution_validity.sage <in_file> <solutions_file> [log_file] "
