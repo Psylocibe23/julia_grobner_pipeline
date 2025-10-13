@@ -18,7 +18,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 INPUT_FILE="$1"
-THREADS="${2:-16}"   # fewer F4 workers to lower peak RAM
+THREADS="${2:-16}"   
 
 [[ -f "$INPUT_FILE" ]] || { echo "Input not found: $INPUT_FILE"; exit 2; }
 
@@ -53,7 +53,6 @@ echo "[$(date)] Input: $INPUT_FILE"
 echo "[$(date)] F4 threads (nr_thrds): $F4_THREADS"
 echo "[$(date)] F4 knobs: la_option=$F4_LA_OPTION initial_hts=$F4_INITIAL_HTS max_nr_pairs=$F4_MAX_PAIRS"
 
-# Use repo as the project; keep depot in HOME by default
 export JULIA_PROJECT=$PWD
 export JULIA_DEPOT_PATH=${JULIA_DEPOT_PATH:-$HOME/.julia}
 
