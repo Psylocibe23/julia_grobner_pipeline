@@ -1,6 +1,8 @@
 # Usage:
 #   sage scripts/verify_pcico_solutions.sage --in data/ANEMOI_p251_r2_a3_PCICO.in \
 #        --sols results/ANEMOI_p251_r2_a3_PCICO_F4_..._LEX_sols.txt
+# 
+# Verify ANEMOI soluitions correctness
 
 import sys, re
 
