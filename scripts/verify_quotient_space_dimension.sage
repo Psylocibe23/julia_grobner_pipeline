@@ -1,4 +1,3 @@
-#!/usr/bin/env sage
 # verify_quotient_space_dimension.sage
 # Usage:  sage scripts/verify_quotient_space_dimension.sage path/to/LEX.txt
 
@@ -108,7 +107,7 @@ def main():
     except Exception as e:
         print(f"Krull dimension: unavailable ({e})")
 
-    # === Singular path (robust across Sage builds) ===
+    # --- Singular path ---
     names = list(R.variable_names())
     names_str = "(" + ",".join(names) + ")"     # <-- IMPORTANT: a single string
     K = R.base_ring()
