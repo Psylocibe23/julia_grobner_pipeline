@@ -53,7 +53,7 @@ def is_unset(s):
 
 def split_to_F2_vec(elem, n):
     """
-    Coordinates of elem ∈ GF(2^n) on the construction power basis as GF(2)^n.
+    Coordinates of elem in GF(2^n) on the construction power basis as GF(2)^n.
     """
     F2 = elem.parent().base_ring()
     try:
@@ -98,7 +98,7 @@ def write_secret_log(secret_logfile, n, K, F_univar, A_S, b_S, A_T, b_T, secret_
         S.write("b_T = (" + ", ".join(str(int(b)) for b in b_T) + ")\n")
         S.write("Secret = [" + ", ".join(str(int(b)) for b in secret_vec) + "]\n")
 
-# ----- Boolean "degree ≤ 2" Jacobian via bitmasks -----
+# ----- Boolean Jacobian via bitmasks -----
 def _build_jacobian_bitmasks(polys, R):
     n = len(R.gens())
     out = []
@@ -182,7 +182,7 @@ def boolean_reduce(poly, R):
 def booleanize_vec(vec_R, R):
     return [boolean_reduce(p, R) for p in vec_R]
 
-# ----- Univariate HFE builder over K=GF(2^n) (≤ D) -----
+# ----- Univariate HFE builder over K=GF(2^n) (less or equal D) -----
 def random_hfe_univariate(K, n, D, prob_quad=0.7, prob_lin=0.6, must_quad=True, must_lin=True):
     R.<X> = PolynomialRing(K)
     F = R(0)
@@ -243,7 +243,7 @@ def random_hfe_univariate(K, n, D, prob_quad=0.7, prob_lin=0.6, must_quad=True, 
 
     return F, used_max_exp, have_q, have_l
 
-# ----- Fast public map evaluation: K → F2^n split via power basis -----
+# ----- Fast public map evaluation: K -> F2^n split via power basis -----
 def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
     # s(x) = c0 + Σ_v c_v x_v  in K, with c_• determined by A_S,b_S and basis {a^k}
     c = [K(0)]*(n+1)    # c[0]=const; c[v+1] for x_v
@@ -255,7 +255,7 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
             if int(A_S[k, v]) != 0:
                 c[v+1] += ak
 
-    # largest 2^t ≤ D
+    # largest 2^t less or equal D
     max_t = 0; e = 1
     while (e << 1) <= D:
         e <<= 1; max_t += 1
@@ -268,7 +268,7 @@ def fast_public_from_F_and_S(K, a, R, A_S, b_S, F_univar, n, D):
             val = val^2
             c_pow[t][i] = val
 
-    # accumulate y ∈ (F2[x])^n via coefficient splitting
+    # accumulate y in (F2[x])^n via coefficient splitting
     y = [R(0) for _ in range(n)]
     zero_mon = tuple(0 for _ in range(n))
 
@@ -430,7 +430,7 @@ def build_and_export_fast(n, D, out_infile,
 
         lw(f"[map {attempts}] public max degree after Boolean: {max(degs)}")
 
-        # Jacobian precompute & random probing
+        # Jacobian precompute and random probing
         bitJ = _build_jacobian_bitmasks(z0_R, R)
         best_rank = -1
         best_x_tuple = None
