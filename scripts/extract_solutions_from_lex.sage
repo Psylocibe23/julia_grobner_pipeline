@@ -35,7 +35,7 @@
 import sys, os, time
 from sage.all import GF, PolynomialRing
 
-# ================= Utilities ================
+# --------------------------- Utilities ---------------------------
 def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -48,7 +48,7 @@ def log_and_print(msg, fh=None):
     if fh is not None:
         fh.write(msg + "\n")
         fh.flush()
-# ================ 1: parse file ================
+# --------------------------- 1: parse file ---------------------------
 def read_lex_basis_file(lex_file):
     """
     Read headers and polynomials from a LEX GB file produced by fglm_adjusted.sage.
@@ -107,7 +107,7 @@ def read_lex_basis_file(lex_file):
 
     return variables, p, order, polys_str, shape_hdr, zerodim_hdr
 
-# ================ 2: shape position check ================
+# --------------------------- 2: shape position check ---------------------------
 def lex_shape_position(variables, G_lex):
     """
     Heuristic 'shape' test: leading monomials should be pure powers, and
@@ -131,7 +131,7 @@ def lex_shape_position(variables, G_lex):
     except Exception:
         return False
 
-# ================ 3: root finding ================
+# --------------------------- 3: root finding ---------------------------
 def to_true_univariate(poly_mv, var, R, F):
     """
     Convert a multivariate polynomial `poly_mv` into a true univariate f(T) in F[T] by reading its
@@ -169,7 +169,7 @@ def roots_over_field_univariate(poly_mv, var, R, F):
     f_uni = to_true_univariate(poly_mv, var, R, F)      # f ∈ F[T]
     return [a for (a, mult) in f_uni.roots(multiplicities=True, ring=F)]
 
-# ================ 4: branch triangular solver ================
+# --------------------------- 4: branch triangular solver ---------------------------
 def solve_shape_lex_branch(R, variables, G_lex, F, log=None,
                            allow_elimination=False,
                            first_only=False, max_solutions=None, max_nodes=10_000_000):
@@ -349,7 +349,7 @@ def write_solutions(outfile, variables, solutions, name_to_var):
                 parts.append(f"{vname}: {pretty_value(sol[rv])}")
             out.write("{" + ", ".join(parts) + "}\n")
 
-# ================ Main ================
+# --------------------------- Main ---------------------------
 def main():
     # Args
     if len(sys.argv) < 2:
