@@ -30,7 +30,7 @@ using Dates
 using Printf                       
 using Base.Filesystem: mkpath, basename, splitext
 
-# ================ Utils ================
+# --------------------------- Utils ---------------------------
 function isprime64(n::Integer)::Bool
     n ≤ 1 && return false
     n ≤ 3 && return true           
@@ -168,9 +168,9 @@ polys = parse_polynomials(poly_strs)
 I = Ideal(polys)
 
 
-input_id  = splitext(basename(filename))[1]
+input_id = splitext(basename(filename))[1]
 timestamp = Dates.format(now(), "yyyymmdd_HHMMSS")
-log_file    = joinpath("logs",    "$(input_id)_F4_$timestamp.log")
+log_file = joinpath("logs", "$(input_id)_F4_$timestamp.log")
 result_file = joinpath("results", "$(input_id)_F4_$timestamp.txt")
 
 # ================ F4 & Outputs ================
