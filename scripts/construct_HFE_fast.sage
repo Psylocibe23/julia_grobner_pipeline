@@ -1,5 +1,33 @@
 ###############################################################################
 # construct_HFE_fast.sage — Fast, bounded, fail-safe HFE instance generator over GF(2)
+# OUTPUT (pipeline .in, no comments):
+#   line 1: x0, x1, ..., x{n-1}
+#   line 2: 2
+#   next n lines: public equations over GF(2)
+#   last n lines: field equations  x_i^2 + x_i
+#
+# CLASSICAL HFE (char 2):
+#   F(X) uses only exponents 2^i (linearized) and 2^i+2^j with i<j (true HFE quad),
+#   subject to 2^i ≤ D and 2^i + 2^j ≤ D.
+#
+# LOGS:
+#   • Regular generation log (progress + summary)
+#       logs/HFE_n{n}_D{D}_genlog.txt
+#     includes the secret vector as well.
+#
+#   • Secret log (parse-friendly details for verification)
+#       logs/HFE_n{n}_D{D}_secret.txt
+#     contains:
+#       Field: GF(2^n)
+#       Modulus polynomial: <irreducible poly over GF(2)>
+#       F(X) = <polynomial over GF(2^n)[X]>
+#       A_S = # matrix block (one row per line)
+#       [ ... ]
+#       b_S = ( ... )
+#       A_T =
+#       [ ... ]
+#       b_T = ( ... )
+#       Secret = [ ... ]
 #
 # Behavior:
 #   • Tries to generate an instance with target degree D and Jacobian rank n-1.
