@@ -18,14 +18,14 @@
 
 import sys, os, time
 
-# ================ Helpers ================
+# --------------------------- Helpers ---------------------------
 def ensure_dir(d): os.path.isdir(d) or os.makedirs(d)
 def stem_of(p): return os.path.splitext(os.path.basename(p))[0]
 def logprint(msg, fh=None):
     print(msg, flush=True)
     if fh: fh.write(msg + "\n"); fh.flush()
 
-# ================ Parsing LEX basis file ================
+# --------------------------- Parsing LEX basis file ---------------------------
 def read_lex_basis_file(path):
     """
     Expect the header your FGLM scripts write:
@@ -73,7 +73,7 @@ def read_lex_basis_file(path):
 
     return variables, p, (order or "UNKNOWN"), polys_str, shape_hdr, zerodim_hdr
 
-# ================ Shape position tests ================
+# --------------------------- Shape position tests ---------------------------
 def shape_heuristic(variables, G):
     try:
         Gs = sorted(G, key=lambda g: g.lm(), reverse=True)
@@ -107,7 +107,7 @@ def shape_strict(variables, G):
         if cand[0].degree(v) != 1: return False
     return True
 
-# ================ Univariate conversion ================
+# --------------------------- Univariate conversion ---------------------------
 def to_true_univariate(poly_mv, var, R, F):
     gens = list(R.gens())
     i = gens.index(var)
@@ -124,7 +124,7 @@ def to_true_univariate(poly_mv, var, R, F):
         arr[e[i]] += F(c)
     return U(arr)
 
-# ================ Triangular back-substitution over a field K ================
+# --------------------------- Triangular back-substitution over a field K ---------------------------
 def solve_triangular_over_field(variables, G_lex, K, last_roots,
                                 first_only=False, max_solutions=None, log=None):
     """
@@ -210,7 +210,7 @@ def solve_triangular_over_field(variables, G_lex, K, last_roots,
 
     return sols
 
-# ================ Main ================
+# --------------------------- Main ---------------------------
 def main():
     if len(sys.argv) < 2:
         print("Usage: sage scripts/extract_anemoi_solutions.sage results/<stem>_LEX.txt "
