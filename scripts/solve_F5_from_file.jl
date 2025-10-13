@@ -15,7 +15,7 @@ using Dates
 mkpath("logs")
 mkpath("results")
 
-# ================ Parsing ================
+# --------------------------- Parsing ---------------------------
 function parse_args()
     if length(ARGS) < 1
         println("Usage: julia solve_F4_from_file.jl <inputfile> [nthreads]")
@@ -31,7 +31,7 @@ lines = readlines(filename)
 var_names = [strip(v) for v in split(strip(lines[1]), ",")]  # Expect first line to be variable names, separated by commas (e.g., "x, y, z") 
 p = parse(Int, strip(lines[2]))  # Second line: field characteristic (prime number p, for GF(p))
 
-# ================ Field and polynomial ring ================
+# --------------------------- Field and polynomial ring ---------------------------
 # If the characteristic is 2, use GF(2), else use GF(p).
 if p == 2
     K = GF(2)
@@ -61,13 +61,13 @@ for line in lines[3:end]
     end
 end
 
-# ================ Log file ================
+# --------------------------- Log file ---------------------------
 input_id = splitext(basename(filename))[1]
 timestamp = Dates.format(now(), "yyyymmdd_HHMMSS")
 log_file = "logs/$(input_id)_F5_$timestamp.log"
 result_file = "results/$(input_id)_F5_$timestamp.txt"
 
-# ================ F5 ================
+# --------------------------- F5 ---------------------------
 open(log_file, "w") do logio
     redirect_stdout(logio) do
         redirect_stderr(logio) do
