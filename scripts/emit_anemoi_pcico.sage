@@ -37,7 +37,7 @@ try:
 except Exception:
     constants_mod = None
 
-# ================= CLI parsing =================
+# --------------------------- CLI parsing ---------------------------
 def _usage_and_exit():
     print("Usage: sage scripts/emit_anemoi_pcico.sage --p <prime|0xHEX|NAME> --alpha <odd> --rounds <r> "
           "[--outfile path] [--ordering 1|2|3] [--no-final-ll]", file=sys.stderr)
@@ -68,7 +68,7 @@ while i < len(argv):
 if args["p"] is None or args["alpha"] is None or args["rounds"] is None:
     _usage_and_exit()
 
-# ================= Convert/validate p =================
+# --------------------------- Convert/validate p ---------------------------
 def resolve_prime(p_spec):
     """
     p_spec may be decimal int, 0x... hex, or a symbol in constants.py.
@@ -104,7 +104,7 @@ if gcd(alpha, p-1) != 1:
 if args["ordering"] not in (1,2,3):
     raise ValueError("ordering must be one of {1,2,3} (recommended: 1)")
 
-# ================= Build the PCICO system =================
+# --------------------------- Build the PCICO system ---------------------------
 # l = 1 (n_cols = 1)
 P = AnemoiPermutation(q=p, alpha=alpha, n_rounds=r, n_cols=1)
 
@@ -124,7 +124,7 @@ expected_eqs = r + (1 if args["final_ll"] else 0)
 if len(F_CICO) != expected_eqs:
     print(f"[warn] Got {len(F_CICO)} equations; expected {expected_eqs}. Proceeding.", file=sys.stderr)
 
-# ================= Write the .in file =================
+# --------------------------- Write the .in file ---------------------------
 if args["outfile"] is None:
     stem = f"ANEMOI_p{p}_r{r}_a{alpha}_PCICO" + ("" if args["final_ll"] else "_noFLL")
     outdir = "data"
