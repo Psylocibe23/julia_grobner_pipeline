@@ -10,14 +10,14 @@
 import sys, os, re, time, multiprocessing
 from sage.all import *
 
-# ================ Utils ================
+# --------------------------- Utils ---------------------------
 
 def parse_time_budget(tok):
     """
     Parse a time string into seconds.
     Accepts:
       - bare seconds: "90"
-      - with units:   "60s", "2m", "1m30s", "1h", "1h2m3s"
+      - with units: "60s", "2m", "1m30s", "1h", "1h2m3s"
       - a trailing '+' is allowed and ignored: "60+" -> 60
       - "0", "", "none", "off", "-" => 0 (skip)
     """
@@ -52,7 +52,7 @@ def get_flag(argv, name, default="0"):
             return a[len(prefix):]
     return default
 
-# ================ Input parsing ================
+# --------------------------- Input parsing ---------------------------
 def parse_input_system(filename):
     """
     Parse the input file describing the polynomial system
@@ -83,12 +83,12 @@ def parse_input_system(filename):
     polys = lines[2:]
     return var_names, F, field_desc, polys
 
-# ================ Homogeneity check ================
+# --------------------------- Homogeneity check ---------------------------
 def is_homogeneous(poly):
     degs = [m.degree() for m in poly.monomials()]
     return len(set(degs)) == 1
 
-# ================ Computations ================
+# --------------------------- Computations ---------------------------
 
 def _dim_worker(infile, outq):
     try:
@@ -153,7 +153,7 @@ def run_with_timeout(target, args, timeout_sec):
     else:
         return ("err", value)
 
-# ================ Main ================
+# --------------------------- Main ---------------------------
 def main():
     if len(sys.argv) < 2:
         print("Usage: sage system_diagnosis.sage <input_file.in> [--dim=SECONDS] [--hilbert=SECONDS]")
