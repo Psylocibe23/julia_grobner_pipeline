@@ -2,9 +2,9 @@
 # solve_F4_from_file_parsing.jl — F4 Gröbner basis (DRL) with streaming parser
 ################################################################################
 
-using AlgebraicSolving              # Ideal, groebner_basis, normal_form
-import AbstractAlgebra              # MPolyBuildCtx, polynomial_ring
-import Nemo                         # GF(p)
+using AlgebraicSolving             
+import AbstractAlgebra              
+import Nemo                         
 using Dates, Printf
 using Base.Filesystem: mkpath, basename, splitext
 
@@ -24,10 +24,10 @@ filename, nthreads_cli = parse_args()
 mkpath("logs"); mkpath("results")
 
 # Environment-tunable F4 knobs (with safe defaults)
-const F4_THREADS     = parse(Int,  get(ENV, "F4_THREADS",      string(nthreads_cli)))
-const F4_MAX_PAIRS   = parse(Int,  get(ENV, "F4_MAX_PAIRS",     "6000"))   # cap S-pairs
-const F4_INITIAL_HTS = parse(Int,  get(ENV, "F4_INITIAL_HTS",   "19"))     # smaller hash tables
-const F4_LA_OPTION   = parse(Int,  get(ENV, "F4_LA_OPTION",     "22"))     # memory-friendlier than 44
+const F4_THREADS     = parse(Int,  get(ENV, "F4_THREADS", string(nthreads_cli)))
+const F4_MAX_PAIRS   = parse(Int,  get(ENV, "F4_MAX_PAIRS", "6000"))   # cap S-pairs
+const F4_INITIAL_HTS = parse(Int,  get(ENV, "F4_INITIAL_HTS", "19"))     # smaller hash tables
+const F4_LA_OPTION   = parse(Int,  get(ENV, "F4_LA_OPTION", "22"))     # memory-friendlier than 44
 
 # ---------------- Input (.in) reader ----------------
 # Line 1: comma-separated variable names
@@ -96,7 +96,7 @@ var_names, p, poly_strs = parse_input_system(filename)
 K = Nemo.GF(p)
 R, vars = AbstractAlgebra.polynomial_ring(K, var_names; internal_ordering = :degrevlex)
 
-# Bind variables into Main so Meta.parse-based printing would match (not required here)
+# Bind variables into Main so Meta.parse-based printing would match
 for (i, v) in enumerate(var_names)
     @eval Main $(Symbol(v)) = vars[$i]
 end
@@ -114,7 +114,6 @@ end
 end
 
 # ---------------- Streaming polynomial parser ----------------
-# Grammar per term:   [±] [int coeff]* [*] (var[^exp] [*])*    until next ±
 # Assumes the .in is fully expanded (no parentheses).
 function parse_poly_line_build(s::String, R, K, var_index::Dict{String,Int}, p::Integer)
     s = replace(s, " " => "")
