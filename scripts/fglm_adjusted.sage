@@ -4,7 +4,7 @@
 # PURPOSE
 #   Given a DRL Gröbner basis over GF(p), produce a LEX
 #   • Try Option A (safe FGLM) first: Ideal.transformed_basis('fglm', R_lex)
-#       then (optionally) reduce using Singular Buchberger (no Hilbert).
+#       then (optionally) reduce using Singular Buchberger.
 #   • On failure/timeout, fall back to Option B: compute std in pure LEX
 #       with Singular’s Buchberger (algorithm='singular:std').
 #
@@ -37,7 +37,7 @@ from sage.interfaces.singular import singular
 # allow parsing of very large polynomials
 sys.setrecursionlimit(max(sys.getrecursionlimit(), 500000))
 
-# ================ Utilities ================
+# --------------------------- Utilities ---------------------------
 def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -71,7 +71,7 @@ def run_with_timeout(fn, seconds, on_timeout=None):
     else:
         return fn()
 
-# ================ Parse an F4/F5 basis file ================
+# --------------------------- Parse an F4/F5 basis file ---------------------------
 def read_groebner_basis_file(result_file):
     variables, field_p, order = None, None, None
     basis_start = None
@@ -113,7 +113,7 @@ def read_groebner_basis_file(result_file):
 
     return variables, field_p, (order or "UNKNOWN"), polys
 
-# ================ Shape-position checks (for info only) ================
+# --------------------------- Shape-position checks ---------------------------
 def shape_heuristic(variables, G_lex):
     try:
         G_sorted = sorted(G_lex, key=lambda g: g.lm(), reverse=True)
@@ -151,10 +151,10 @@ def shape_strict(variables, G_lex):
             return False
     return True
 
-# ================ FGLM ================
+# --------------------------- FGLM ---------------------------
 def run_fglm_safe(I_drl, R_lex, timeout_sec, log):
     """
-    Option A: Safe FGLM (no Hilbert). Uses Sage/Singular's FGLM wrapper.
+    Option A: FGLM, uses Sage/Singular's FGLM wrapper.
     """
     def _run():
         return I_drl.transformed_basis('fglm', R_lex)
@@ -168,7 +168,6 @@ def run_fglm_safe(I_drl, R_lex, timeout_sec, log):
 def reduce_lex_with_std(R_lex, G_lex_raw, timeout_sec, log, mode_label):
     """
     Reduce a LEX basis using Singular's Buchberger (algorithm='singular:std').
-    This avoids stdhilb/Hilbert and is robust.
     """
     I_lex = R_lex.ideal(G_lex_raw)
     def _reduce():
@@ -195,7 +194,7 @@ def run_std_lex_direct(R_lex, polys_lex, timeout_sec, log):
     log_and_print(f"[B] std(lex) done in {t1 - t0:.3f} s  (|G_lex|={len(G_lex)})", log)
     return G_lex
 
-# ================ Main ================
+# --------------------------- Main ---------------------------
 def main():
     from sage.all import GF, PolynomialRing
 
