@@ -50,9 +50,12 @@ HPC (Slurm): submit the provided sbatch files (single-node, threaded) for long r
 ### 1. **HFE instance generation**
 
 **Script:** `scripts/construct_HFE_fast.sage` 
+
 **What it does:**
 Fast, bounded, fail-safe generator of classical HFE instances over GF(2) (targets degree 𝐷, enforces Jacobian rank ≈ 𝑛−1, emits best-so-far on timeout).
+
 **Outputs:** a pipeline .in file — variables, field id 2, 𝑛 public equations, then n field equations — plus public and secret logs.
+
 **Example usage**
 ```bash
 # Generate an HFE(n=80, D=96) instance with a fixed seed; write .in and logs
