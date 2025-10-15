@@ -113,4 +113,75 @@ julia scripts/solve_F4_from_file_parsing.jl data/HFE_n80_D96.in 32
 #   results/HFE_n80_D96_F4_<timestamp>.txt
 ```
 
+### 4. **F5 Gröbner basis (DRL) — single-threaded, small systems**
 
+**Script:** `solve_F5_from_file.jl`
+
+**What it does:**  
+Reads a pipeline `.in` system (variables, prime `p`, expanded polynomials), builds a DRL ring over `GF(p)`, and computes a Gröbner basis using **F5** (`sig_groebner_basis` from AlgebraicSolving.jl).  
+**Single-threaded by design** and intended for **small/medium, sanity-check experiments** — **not** for large instances or long HPC runs.
+
+**Outputs:**  
+- `logs/<basename>_F5_<yyyymmdd_HHMMSS>.log`  
+- `results/<basename>_F5_<yyyymmdd_HHMMSS>.txt`
+
+**Example usage**
+```bash
+# Run F5 on a small instance (single-threaded)
+julia scripts/solve_F5_from_file.jl data/HFE_n10_D16.in
+
+# Produces:
+#   logs/HFE_n10_D16_F5_<timestamp>.log
+#   results/HFE_n10_D16_F5_<timestamp>.txt
+```
+
+### 5. **DRL → LEX conversion (FGLM with std fallback)**
+
+**Script:** `fglm_adjusted.sage`
+
+**What it does:**  
+Converts a **DRL** Gröbner basis (from F4/F5) over `GF(p)` to **LEX**. Tries a **safe FGLM** first, then (on failure/timeout or if preferred) falls back to **Singular’s** Buchberger in **pure LEX** (`algorithm='singular:std'`). Optional post-reduction of the LEX basis via `std`.
+
+**Outputs:**  
+- `results/<basename>_LEX.txt` — the (possibly reduced) LEX Gröbner basis  
+- `logs/<basename>_FGLM_adjusted.log` — full conversion log (method used, degrees, shape checks)
+
+**Example usage**
+```bash
+# Preferred: try FGLM (unlimited), fallback to std(lex) if needed; skip dim() check
+sage scripts/fglm_adjusted.sage results/HFE_n80_D96_F4_20250101_120000.txt \
+  --assume-zerodim --fglm-timeout=0 --reduce=auto --reduce-timeout=300
+
+# Strict budget: allow 60s to confirm dim=0, 1800s for FGLM; always reduce (fail on timeout)
+sage scripts/fglm_adjusted.sage results/HFE_n80_D96_F4_20250101_120000.txt \
+  --dim-timeout=60 --fglm-timeout=1800 --reduce=always --reduce-timeout=600
+
+# Force direct std(lex), skipping FGLM
+sage scripts/fglm_adjusted.sage results/HFE_n80_D96_F4_20250101_120000.txt \
+  --prefer=std --fglm-timeout=0 --reduce=never
+
+# CLI flags
+--assume-zerodim
+    Treat the ideal as zero-dimensional and skip dimension().
+
+--dim-timeout=SECONDS
+    Wall-time budget for dimension(); default: 60. Use 0 to skip.
+
+--fglm-timeout=SECONDS
+    Wall-time budget for FGLM; default: 0 (unlimited).
+
+--reduce=never|auto|always
+    Post-reduce the produced LEX basis via std. Default: never.
+      never  -> write the raw LEX basis.
+      auto   -> try to reduce; on timeout keep the raw basis.
+      always -> enforce reduction; on timeout the job fails.
+
+--reduce-timeout=SECONDS
+    Wall-time budget for std reduction; default: 120.
+
+--prefer=auto|fglm|std
+    Pipeline policy; default: auto.
+      auto -> try FGLM; on failure/timeout fall back to std(lex).
+      fglm -> only attempt FGLM (no fallback).
+      std  -> skip FGLM and compute std(lex) directly.
+```
