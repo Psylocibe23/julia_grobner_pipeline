@@ -3,7 +3,7 @@
 This repository contains the complete code accompanying the Master’s thesis
 **“Gröbner Bases Applied to Algebraic Cryptography”** by Frederick Spreafichi (University of Trieste, MSc in Mathematics).
 
-The project investigates the effectiveness and role of Gröbner bases in algebraic cryptography, with experiments on classic HFE over GF(2) and on ANEMOI in P_CICO mode (using the ANEMOI generation code from the official repository: https://github.com/isec-tugraz/six-worlds-anemoi.git).
+The project investigates the effectiveness and role of Gröbner bases in algebraic cryptography, with experiments on classic HFE over `GF(2)` and on ANEMOI in P_CICO mode (using the ANEMOI generation code from the official repository: https://github.com/isec-tugraz/six-worlds-anemoi.git).
 
 1. computation of a DRL Gröbner basis via **F4/F5**;
 
@@ -18,8 +18,8 @@ The codebase uses Julia, SageMath, and Singular to run Gröbner-basis attacks on
 ## Pipeline overview
 
 1. **HFE instance generation (SageMath)**
-Generate HFE(𝑛,𝐷) instances over GF(2), with optional planted solution and field equations.
-Output: data/hfe_instances/HFE_n{n}_D{D}.in (+ metadata log).
+Generate HFE(𝑛,𝐷) instances over `GF(2)`, with optional planted solution and field equations.
+Output: data/hfe_instances/HFE_n_D.in (+ metadata log).
 
 2. **System diagnosis (SageMath)**
 Sanity checks and quick invariants (variable/eq counts, degrees, sparsity, optional random evaluation tests).
@@ -52,7 +52,7 @@ HPC (Slurm): submit the provided sbatch files (single-node, threaded) for long r
 **Script:** `construct_HFE_fast.sage` 
 
 **What it does:**
-Fast, bounded, fail-safe generator of classical HFE instances over GF(2) (targets degree 𝐷, enforces Jacobian rank ≈ 𝑛−1, emits best-so-far on timeout).
+Fast, bounded, fail-safe generator of classical HFE instances over `GF(2)` (targets degree 𝐷, enforces Jacobian rank ≈ 𝑛−1, emits best-so-far on timeout).
 
 **Outputs:** a pipeline `.in` file — variables, field id 2, 𝑛 public equations, then n field equations — plus public and secret logs.
 
@@ -184,4 +184,133 @@ sage scripts/fglm_adjusted.sage results/HFE_n80_D96_F4_20250101_120000.txt \
       auto -> try FGLM; on failure/timeout fall back to std(lex).
       fglm -> only attempt FGLM (no fallback).
       std  -> skip FGLM and compute std(lex) directly.
+```
+
+### 6. **Solution retrieval from LEX basis**
+
+**Script:** `extract_solutions_from_lex.sage`
+
+**What it does:**  
+Given a Gröbner basis in **LEX** order over GF(p), extracts all solutions in the base field. It prefers a fast triangular route: solve a univariate in the last variable if present; otherwise branch over the last variable’s values (cheap over GF(2)) and ascend with pruning. Verifies and deduplicates all candidates; includes an optional small-n fallback via `I.variety(GF(p))`.
+
+**Outputs:**  
+- `results/<stem>_LEX_sols.txt` — one solution per line (e.g., `{x0: 1, x1: 0, ...}`)  
+- `logs/<stem>_LEX_extract.log` — verbose run log
+
+**Example usage**
+```bash
+# Fast triangular extraction, keep default safeguards
+sage scripts/extract_solutions_from_lex.sage results/HFE_n80_D96_F4_20250101_120000_LEX.txt
+
+# Return only the first solution, cap exploration nodes, allow elimination fallback
+sage scripts/extract_solutions_from_lex.sage results/HFE_n10_D16_F4_20250101_120000_LEX.txt \
+  --first-only --node-limit 200000 --elim
+
+# Enumerate at most 8 solutions, disable small-n fallback
+sage scripts/extract_solutions_from_lex.sage results/HFE_n24_D48_F4_20250101_120000_LEX.txt \
+  --max-solutions 8 --no-fallback
+```
+
+### 7. **HFE solution validity checker**
+
+**Script:** `test_hfe_solution_validity.sage`
+
+**What it does:**  
+Given a pipeline `.in` file (variables, field, public equations, optional field equations), a solutions file (one dict-like solution per line), and optionally a generation/secret log, verifies for each candidate:  
+(1) satisfies all public equations;  
+(2) satisfies field equations `x_i^2 + x_i` if present;  
+(3) equals the planted secret if available;  
+(4) S-equivalence to the secret via `A_S x + b_S` over `GF(2)`. Optionally prints the Jacobian rank at each solution.
+
+**Outputs:**  
+- Prints a per-solution validation report to stdout  
+- No files written by default (intended for quick checks in the pipeline)
+
+**Example usage**
+```bash
+# Basic check: public + (optional) field equations
+sage scripts/test_hfe_solution_validity.sage data/HFE_n80_D96.in results/HFE_n80_D96_F4_20250101_120000_LEX_sols.txt
+
+# Also load secret & affine maps from generation log, and print Jacobian rank
+sage scripts/test_hfe_solution_validity.sage data/HFE_n80_D96.in \
+  results/HFE_n80_D96_F4_20250101_120000_LEX_sols.txt logs/HFE_n80_D96_secret.txt --rank
+
+# Provide a secret explicitly on the CLI (comma/space-separated), no log file
+sage scripts/test_hfe_solution_validity.sage data/HFE_n10_D16.in \
+  results/HFE_n10_D16_F4_20250101_120000_LEX_sols.txt --secret 1,0,1,0,0,1 --rank
+```
+
+### 8. **ANEMOI P_CICO emitter (l = 1)**
+
+**Script:** `emit_anemoi_pcico.sage`
+
+**What it does:**  
+Emits **ANEMOI** polynomial systems in **P_CICO** mode with **l = 1** over **GF(p)** (odd prime). You specify the prime `p`, S-box exponent `alpha` (odd, `gcd(alpha, p−1)=1`), and the number of rounds `r`. The script builds the model (ordering 1|2|3), and writes a pipeline `.in` file ready for the F4/F5 → FGLM → solution pipeline.
+
+**Outputs:**  
+- `data/ANEMOI_p<p>_r<r>_a<alpha>_PCICO[ _noFLL ].in` (unless `--outfile` is provided)  
+  - Line 1: comma-separated variable names (in the DRL tie-break order used by the model)  
+  - Line 2: the prime `p`  
+  - Line 3+: one polynomial per line (Sage textual form; coefficients in `[0..p-1]`)
+
+**Example usage**
+```bash
+# Minimal: prime by value, odd alpha, r rounds
+sage scripts/emit_anemoi_pcico.sage --p 251 --alpha 3 --rounds 2
+
+# Choose variable ordering and omit the final linear layer constraint
+sage scripts/emit_anemoi_pcico.sage --p 101 --alpha 5 --rounds 3 --ordering 2 --no-final-ll
+
+# Hex literal for p and explicit output path
+sage scripts/emit_anemoi_pcico.sage --p 0xFFFFFFFF00000001 --alpha 3 --rounds 2 \
+  --outfile data/ANEMOI_custom.in
+
+# CLI flags
+--p <prime|0xHEX|NAME>
+    Field prime. Accepts a decimal integer, a 0x... hex literal, or a symbol defined in scripts/constants.py.
+
+--alpha <odd>
+    S-box exponent; must satisfy gcd(alpha, p-1) = 1.
+
+--rounds <r>
+    Number of rounds (P_CICO, l = 1).
+
+--outfile <path>
+    Optional output file. Default: data/ANEMOI_p<p>_r<r>_a<alpha>_PCICO[ _noFLL ].in
+
+--ordering {1|2|3}
+    Variable ordering in the P_CICO model. Default: 1 (recommended).
+
+--no-final-ll
+    Omit the final linear layer constraint. Default: include it.
+```
+
+### 9. **ANEMOI algebraic-closure analysis & solution enumeration**
+
+**Script:** `extract_anemoi_solutions.sage`
+
+**What it does:**  
+Given a **LEX** Gröbner basis over GF(p), locates the univariate **eliminant** in the last variable, reports algebraic-closure solution counts (total with multiplicity = `deg(f_last)`, distinct = `deg(squarefree(f_last))`), provides a factor-degree breakdown over GF(p), and (optionally) **enumerates concrete solutions** in minimal extensions GF(p^d) for small factor degrees.
+
+**Outputs:**  
+- `results/<stem>_AC_report.txt` — counts + factor-degree breakdown  
+- `results/<stem>_AC_solutions.txt` — optional: enumerated solutions over GF(p^d)  
+- `logs/<stem>_AC_extract.log` — detailed log (shape checks, timing, enumeration summary)
+
+**Example usage**
+```bash
+# Produce algebraic-closure counts and factor breakdown (no enumeration limit changes)
+sage scripts/extract_anemoi_solutions.sage results/ANEMOI_p251_r2_a3_PCICO_LEX.txt
+
+# Enumerate roots only up to degree 4 in the minimal extension, stop after first solution
+sage scripts/extract_anemoi_solutions.sage results/ANEMOI_p251_r2_a3_PCICO_LEX.txt \
+  --enum-maxdeg 4 --first-only
+
+# Enumerate up to 20 solutions overall; try elimination if no univariate is present
+sage scripts/extract_anemoi_solutions.sage results/ANEMOI_p251_r3_a5_PCICO_LEX.txt \
+  --max-solutions 20 --elim
+
+# Skip enumeration entirely; only the algebraic-closure count report is produced
+sage scripts/extract_anemoi_solutions.sage results/ANEMOI_p101_r3_a5_PCICO_LEX.txt \
+  --skip-enum
 ```
