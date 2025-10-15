@@ -49,12 +49,12 @@ HPC (Slurm): submit the provided sbatch files (single-node, threaded) for long r
 
 ### 1. **HFE instance generation**
 
-**Script:** `scripts/construct_HFE_fast.sage` 
+**Script:** `construct_HFE_fast.sage` 
 
 **What it does:**
 Fast, bounded, fail-safe generator of classical HFE instances over GF(2) (targets degree 𝐷, enforces Jacobian rank ≈ 𝑛−1, emits best-so-far on timeout).
 
-**Outputs:** a pipeline .in file — variables, field id 2, 𝑛 public equations, then n field equations — plus public and secret logs.
+**Outputs:** a pipeline `.in` file — variables, field id 2, 𝑛 public equations, then n field equations — plus public and secret logs.
 
 **Example usage**
 ```bash
@@ -66,6 +66,51 @@ sage scripts/construct_HFE_fast.sage 80 96 data/ --seed 42
 #   logs/HFE_n80_D96_secret.txt
 ```
 
+### 2. **System diagnosis**
 
+**Script:** `system_diagnosis.sage`
+
+**What it does:**  
+Reads a pipeline `.in` polynomial system, builds the ring/ideal, and reports quick diagnostics (vars/eqs, degrees, sparsity, homogeneity). Optionally computes **Krull dimension** and **degree via Hilbert polynomial** within user-specified wall-time budgets; prints to stdout and saves a log.
+
+**Outputs:** `logs/<basename>_diagnostics.log` (e.g., `logs/HFE_n80_D96_diagnostics.log`), plus the same summary on stdout.
+
+**Example usage**
+```bash
+# Diagnose an input system with 60s budget for dimension and 120s for Hilbert polynomial
+sage scripts/system_diagnosis.sage data/HFE_n80_D96.in --dim=60 --hilbert=120
+
+# Produces:
+#   logs/HFE_n80_D96_diagnostics.log
+```
+
+### 3. **F4 Gröbner basis (DRL) — streaming parser**
+
+**Script:** `solve_F4_from_file_parsing.jl`
+
+**What it does:**  
+Parses a pipeline `.in` file (vars, prime `p`, expanded polynomials), builds a DRL ring over `GF(p)` via `AbstractAlgebra/Nemo`, and runs `AlgebraicSolving.groebner_basis` (F4). Writes a timestamped log and result file, and verifies that the input generators reduce to `0` modulo the computed basis.
+
+**Outputs:**  
+- `logs/<basename>_F4_<yyyymmdd_HHMMSS>.log`  
+- `results/<basename>_F4_<yyyymmdd_HHMMSS>.txt`
+
+**Example usage**
+```bash
+# Basic run, 16 threads requested to F4; environment knobs use safe defaults
+julia scripts/solve_F4_from_file_parsing.jl data/HFE_n80_D96.in 16
+
+# (Optional) tune F4 via environment variables:
+#   F4_THREADS     — threads used inside F4 (default: CLI nthreads)
+#   F4_MAX_PAIRS   — cap on S-pairs in the queue (default: 6000)
+#   F4_INITIAL_HTS — initial hash table size log2 (default: 19)
+#   F4_LA_OPTION   — linear algebra backend/strategy (default: 22)
+F4_THREADS=32 F4_MAX_PAIRS=8000 F4_INITIAL_HTS=20 F4_LA_OPTION=22 \
+julia scripts/solve_F4_from_file_parsing.jl data/HFE_n80_D96.in 32
+
+# Produces:
+#   logs/HFE_n80_D96_F4_<timestamp>.log
+#   results/HFE_n80_D96_F4_<timestamp>.txt
+```
 
 
